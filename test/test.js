@@ -47,7 +47,12 @@ const check = (name, ex) => {
       if (name === 'imgTitleAttr') {
         h = setMarkdownImgAttrToPCaption(m, {imgTitleCaption: true})
       }
-  
+
+      if (name === 'labelLang') {
+        h = setMarkdownImgAttrToPCaption(m, {labelLang: 'en'})
+      }
+
+
         try {
       assert.strictEqual(h, ms[n].outputMarkdown)
     } catch(e) {
@@ -64,6 +69,7 @@ const check = (name, ex) => {
 const example = {
     default: __dirname + path.sep + 'examples.txt',
     imgTitleAttr: __dirname + path.sep + 'examples-img-title-attr.txt',
+    labelLang: __dirname + path.sep + 'examples-label-lang.txt',
 }
 for (let ex in example) {
   console.log('[Test] ' + ex)

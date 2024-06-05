@@ -9,6 +9,9 @@ const setMarkdownImgAttrToPCaption = (markdown, option) => {
       if (option.imgTitleCaption) {
         opt.imgTitleCaption = option.imgTitleCaption
       }
+      if (option.labelLang) {
+        opt.labelLang = option.labelLang
+      }
     }
     if (opt.imgTitleCaption) opt.imgAltCaption = false
 

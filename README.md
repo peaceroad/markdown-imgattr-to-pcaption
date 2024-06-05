@@ -64,7 +64,7 @@ setMarkdownImgAttrToPCaption(markdownCont)
 
 ## Option
 
-### imgTitleCaption
+### imgTitleCaption: true
 
 ```
 [Input]
@@ -81,6 +81,27 @@ setMarkdownImgAttrToPCaption(markdownCont)
 図　キャプション
 
 ![ALT](image.jpg)
+
+段落。段落。段落。
+```
+
+### labelLang: 'en'
+
+```
+[Input]
+段落。段落。段落。
+
+![キャプション](image.jpg)
+
+段落。段落。段落。
+
+
+[Output]
+段落。段落。段落。
+
+Figure. キャプション
+
+![](image.jpg)
 
 段落。段落。段落。
 ```
