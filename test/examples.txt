@@ -1,14 +1,3 @@
-# markdown-imgattr-to-pcaption
-
-Change img alt attribute to figure caption paragraph for p7d-markdown-it-p-captions.
-
-```
-import setMarkdownImgAttrToPCaption from '@peaceroad/setMarkdownImgAttrToPCaption'
-
-setMarkdownImgAttrToPCaption(markdownCont)
-```
-
-```
 [Input]
 段落。段落。段落。
 
@@ -60,27 +49,40 @@ setMarkdownImgAttrToPCaption(markdownCont)
 ![](image.jpg)
 
 段落。段落。段落。
-```
 
-## Option
 
-### imgTitleCaption
 
-```
 [Input]
 段落。段落。段落。
 
-![ALT](image.jpg "キャプション")
+![図1　キャプション](image.jpg)
 
 段落。段落。段落。
-
 
 [Output]
 段落。段落。段落。
 
-図　キャプション
+図1　キャプション
 
-![ALT](image.jpg)
+![](image.jpg)
 
 段落。段落。段落。
-```
+
+
+[Input]
+段落。段落。段落。
+
+![図1：キャプション](image.jpg)
+
+段落。段落。段落。
+
+[Output]
+段落。段落。段落。
+
+図1：キャプション
+
+![](image.jpg)
+
+段落。段落。段落。
+
+
