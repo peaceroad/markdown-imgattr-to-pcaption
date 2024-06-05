@@ -3,7 +3,7 @@
 Change img alt attribute to figure caption paragraph for p7d-markdown-it-p-captions.
 
 ```
-import setMarkdownImgAttrToPCaption from '@peaceroad/setMarkdownImgAttrToPCaption'
+import setMarkdownImgAttrToPCaption from '@peaceroad/markdown-imgattr-to-pcaption'
 
 setMarkdownImgAttrToPCaption(markdownCont)
 ```
