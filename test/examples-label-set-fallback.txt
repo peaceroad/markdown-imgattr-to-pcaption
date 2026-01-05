@@ -1,0 +1,16 @@
+[Input]
+Paragraph.
+
+![A caption](image.jpg)
+
+Paragraph.
+
+
+[Output]
+Paragraph.
+
+Figure. A caption
+
+![](image.jpg)
+
+Paragraph.

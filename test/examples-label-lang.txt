@@ -9,7 +9,7 @@
 [Output]
 段落。段落。段落。
 
-Figure. キャプション
+図　キャプション
 
 ![](image.jpg)
 

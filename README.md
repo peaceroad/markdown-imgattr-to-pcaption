@@ -64,7 +64,9 @@ setMarkdownImgAttrToPCaption(markdownCont)
 
 ## Option
 
-### imgTitleCaption: true
+### imgTitleCaption
+
+Default: false.
 
 ```
 [Input]
@@ -85,7 +87,9 @@ setMarkdownImgAttrToPCaption(markdownCont)
 段落。段落。段落。
 ```
 
-### labelLang: 'en'
+### labelLang
+
+Default: 'en'.
 
 ```
 [Input]
@@ -99,9 +103,67 @@ setMarkdownImgAttrToPCaption(markdownCont)
 [Output]
 段落。段落。段落。
 
-Figure. キャプション
+図　キャプション
 
 ![](image.jpg)
 
 段落。段落。段落。
 ```
+
+### autoLangDetection
+
+Default: true. To force a specific `labelLang`, set `autoLangDetection: false`.
+When `autoLangDetection` is true, it can override an explicitly set `labelLang` (it is treated as the fallback when detection cannot decide).
+
+Detect `labelLang` from the first image caption line. If the caption text contains Japanese characters, it sets `labelLang: 'ja'`. Otherwise, if the caption contains ASCII letters, it sets `labelLang: 'en'` (symbols/emoji are ignored). If the caption contains non-ASCII letters such as accents, the existing `labelLang` is left unchanged.
+
+Example (non-ASCII letters keep the current `labelLang`):
+
+```
+[Input]
+段落。
+
+![Café](image.jpg)
+
+段落。
+
+[Output]
+段落。
+
+Figure. Café
+
+![](image.jpg)
+
+段落。
+```
+Only `ja` and `en` are auto-detected. For other languages, set `labelLang` explicitly (and use `labelSet` as needed) or leave auto-detection off.
+Detection runs only once on the first eligible image line; subsequent images do not affect the language choice.
+
+### labelSet
+
+Override the auto-inserted label, joint, and space for captions without labels (useful for other languages).
+`labelSet` accepts either a single config for the current `labelLang` or a per-language map.
+If a matching language entry is not found, the default (English) label config is used.
+
+```
+setMarkdownImgAttrToPCaption(markdownCont, {
+  labelSet: { label: '図', joint: '：', space: '　' }
+})
+```
+
+```
+setMarkdownImgAttrToPCaption(markdownCont, {
+  labelSet: {
+    en: { label: 'Figure', joint: '.', space: ' ' },
+    ja: { label: '図', joint: '　', space: '' },
+    fr: { label: 'Fig', joint: '.', space: ' ' },
+  }
+})
+```
+
+## Notes
+
+- Only converts images that are on a single line and surrounded by blank lines. Inline images or list items are not changed.
+- Skips fenced code blocks (``` or ~~~).
+- Label detection uses `p7d-markdown-it-p-captions` label patterns (en/ja by default). `labelSet` only affects auto-inserted labels when no label is detected.
+- `autoLangDetection` inspects the first eligible image line and uses the caption text (title when `imgTitleCaption: true`, otherwise alt). If the caption text is empty, it falls back to alt.

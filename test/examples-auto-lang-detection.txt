@@ -1,0 +1,52 @@
+[Input]
+Paragraph.
+
+![A caption ??](image.jpg)
+
+Paragraph.
+
+
+[Output]
+Paragraph.
+
+Figure. A caption ??
+
+![](image.jpg)
+
+Paragraph.
+
+
+[Input]
+段落。
+
+![猫 cat](image.jpg)
+
+段落。
+
+
+[Output]
+段落。
+
+図　猫 cat
+
+![](image.jpg)
+
+段落。
+
+
+[Input]
+段落。
+
+![Café](image.jpg)
+
+段落。
+
+
+[Output]
+段落。
+
+Figure. Café
+
+![](image.jpg)
+
+段落。

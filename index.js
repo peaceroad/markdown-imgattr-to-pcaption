@@ -1,139 +1,305 @@
+import { markAfterNum, markReg, joint } from 'p7d-markdown-it-p-captions'
+import langSets from 'p7d-markdown-it-p-captions/lang.js'
+
+const imageLineReg = /^([ \t]*?)!\[ *?(.*?) *?\]\(([^ ]*?)( +"(.*?)")?\)( *(?:{.*?})?)$/
+const backquoteFenceReg = /^[ \t]*```/
+const tildeFenceReg = /^[ \t]*~~~/
+const blankLineReg = /^[ \t]*$/
+const asciiOnlyReg = /^[\x00-\x7F]*$/
+const whitespaceOnlyReg = /^[\s\u3000]+$/
+const unicodeLetterReg = (() => {
+  try {
+    return new RegExp('\\p{L}', 'u')
+  } catch {
+    return null
+  }
+})()
+
+const DEFAULT_LABEL_CONFIG_MAP = {
+  en: { label: 'Figure', joint: '.', space: ' ' },
+  ja: { label: '図', joint: '　', space: '' },
+}
+
+const buildLabelOnlyReg = () => {
+  const langs = Object.keys(langSets)
+  if (langs.length === 0) return null
+
+  const patterns = []
+  for (const lang of langs) {
+    const data = langSets[lang]
+    if (!data || !data.markReg || !data.markReg.img) continue
+    let pattern = data.markReg.img
+    if (data.type && data.type['inter-word-space']) {
+      pattern = pattern.replace(/([a-z])/g, (match) => '[' + match + match.toUpperCase() + ']')
+    }
+    patterns.push(pattern)
+  }
+
+  if (patterns.length === 0) return null
+  return new RegExp('^(' + patterns.join('|') + ')([ .]?' + markAfterNum + ')?$')
+}
+
+const labelOnlyReg = buildLabelOnlyReg()
+const jointSuffixReg = new RegExp(joint + '$')
+
+const getCaptionText = (imgLine, opt) => {
+  if (opt.imgTitleCaption) {
+    return imgLine[5] || ''
+  }
+  return imgLine[2] || ''
+}
+
+const getCaptionTextForDetection = (imgLine, opt) => {
+  const captionText = getCaptionText(imgLine, opt)
+  if (captionText) {
+    return captionText
+  }
+  return imgLine[2] || ''
+}
+
+const isAsciiOnly = (value) => asciiOnlyReg.test(value)
+const isAsciiLetterCode = (code) => (
+  (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)
+)
+
+const isJapaneseCodePoint = (code) => {
+  return (
+    (code >= 0x3040 && code <= 0x30ff) || // Hiragana + Katakana
+    (code >= 0x31f0 && code <= 0x31ff) || // Katakana extensions
+    (code >= 0x4e00 && code <= 0x9fff) || // CJK Unified Ideographs
+    (code >= 0xff66 && code <= 0xff9f)    // Half-width Katakana
+  )
+}
+
+const containsJapanese = (value) => {
+  for (const ch of value) {
+    const code = ch.codePointAt(0)
+    if (code !== undefined && isJapaneseCodePoint(code)) {
+      return true
+    }
+  }
+  return false
+}
+
+const detectAutoLang = (value) => {
+  let hasAsciiLetter = false
+  for (const ch of value) {
+    const code = ch.codePointAt(0)
+    if (code === undefined) continue
+    if (isJapaneseCodePoint(code)) return 'ja'
+    if (code <= 0x7f) {
+      if (isAsciiLetterCode(code)) {
+        hasAsciiLetter = true
+      }
+      continue
+    }
+    if (unicodeLetterReg) {
+      if (unicodeLetterReg.test(ch)) return null
+    } else if (ch.toLowerCase() !== ch.toUpperCase()) {
+      return null
+    }
+  }
+  return hasAsciiLetter ? 'en' : null
+}
+
+const getInterWordSpace = (labelLang, labelText) => {
+  const lang = langSets[labelLang]
+  if (lang && lang.type) {
+    return Boolean(lang.type['inter-word-space'])
+  }
+  return isAsciiOnly(labelText)
+}
+
+const normalizeLabelConfig = (value) => {
+  if (!value || typeof value !== 'object') return null
+  const config = {}
+  const labelValue = (typeof value.label === 'string')
+    ? value.label
+    : (typeof value.lable === 'string' ? value.lable : undefined)
+  if (labelValue !== undefined) {
+    config.label = labelValue
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'joint')) {
+    config.joint = String(value.joint)
+  }
+  if (Object.prototype.hasOwnProperty.call(value, 'space')) {
+    config.space = String(value.space)
+  }
+  if (Object.keys(config).length === 0) return null
+  return config
+}
+
+const mergeLabelConfig = (base, override) => {
+  if (!override) return base
+  const merged = { ...base }
+  if (Object.prototype.hasOwnProperty.call(override, 'label')) {
+    merged.label = override.label
+  }
+  if (Object.prototype.hasOwnProperty.call(override, 'joint')) {
+    merged.joint = override.joint
+  }
+  if (Object.prototype.hasOwnProperty.call(override, 'space')) {
+    merged.space = override.space
+  }
+  return merged
+}
+
+const getDefaultLabelConfig = (labelLang) => {
+  const base = DEFAULT_LABEL_CONFIG_MAP[labelLang] || DEFAULT_LABEL_CONFIG_MAP.en
+  return { label: base.label, joint: base.joint, space: base.space }
+}
+
+const resolveLabelConfig = (opt) => {
+  let config = getDefaultLabelConfig(opt.labelLang)
+  let mapConfig = null
+  let singleConfig = null
+  if (opt.labelSet && typeof opt.labelSet === 'object') {
+    singleConfig = normalizeLabelConfig(opt.labelSet)
+    if (!singleConfig) {
+      mapConfig = normalizeLabelConfig(opt.labelSet[opt.labelLang])
+    }
+  }
+  config = mergeLabelConfig(config, mapConfig)
+  config = mergeLabelConfig(config, singleConfig)
+
+  if (!config.label) {
+    config.label = DEFAULT_LABEL_CONFIG_MAP.en.label
+  }
+
+  if (config.joint === undefined || config.space === undefined) {
+    const interWordSpace = getInterWordSpace(opt.labelLang, config.label)
+    if (config.joint === undefined) {
+      config.joint = interWordSpace ? '.' : '　'
+    }
+    if (config.space === undefined) {
+      config.space = interWordSpace ? ' ' : '　'
+    }
+  }
+  return config
+}
+
+const buildLabelPrefix = (labelConfig, hasCaption) => {
+  const labelText = labelConfig.label || ''
+  const joint = labelConfig.joint || ''
+  const space = labelConfig.space || ''
+  let prefix = labelText
+
+  if (joint) {
+    const jointIsWhitespace = whitespaceOnlyReg.test(joint)
+    if (hasCaption || !jointIsWhitespace) {
+      if (!prefix.endsWith(joint)) {
+        prefix += joint
+      }
+    }
+  }
+
+  if (hasCaption && space) {
+    if (!prefix.endsWith(space)) {
+      if (!(space === joint && prefix.endsWith(joint))) {
+        prefix += space
+      }
+    }
+  }
+  return prefix
+}
+
+const buildLabelMeta = (opt) => {
+  return resolveLabelConfig(opt)
+}
+
 const setMarkdownImgAttrToPCaption = (markdown, option) => {
 
   const opt = {
     imgAltCaption : true,
     imgTitleCaption: false,
-    labelLang: 'ja',
+    labelLang: 'en',
+    autoLangDetection: true,
+    labelSet: null, // { label: '図', joint: '：', space: '　' } or { ja: { label: '図', joint: '　', space: '' }, en: { label: 'Figure', joint: '.', space: ' ' } }
     }
-    if (option !== undefined) {
+    if (option && typeof option === 'object') {
       if (option.imgTitleCaption) {
         opt.imgTitleCaption = option.imgTitleCaption
       }
       if (option.labelLang) {
         opt.labelLang = option.labelLang
       }
+      if (option.labelSet && typeof option.labelSet === 'object') {
+        opt.labelSet = option.labelSet
+      }
+      if (Object.prototype.hasOwnProperty.call(option, 'autoLangDetection')) {
+        opt.autoLangDetection = Boolean(option.autoLangDetection)
+      }
     }
     if (opt.imgTitleCaption) opt.imgAltCaption = false
 
-    let n = 0
-    let lines = markdown.split(/\r\n|\n/)
-    let lineBreaks = markdown.match(/\r\n|\n/g);
+    const lines = markdown.split(/\r\n|\n/)
+    const lineBreaks = markdown.match(/\r\n|\n/g) || []
     let isBackquoteCodeBlock = false
     let isTildeCodeBlock = false
-    const br = lineBreaks ? lineBreaks[0] : ''
+    const br = lineBreaks[0] || '\n'
+
+    let labelMeta = null
+    let autoLangChecked = !opt.autoLangDetection
   
     if(lines.length === 0) return markdown
   
-    while (n < lines.length) {
-      let isPrevBreakLine = false
-      let isNextBreakLine = false
-      if (lines[n].match(/^[ \t]*```/)) {
-        if (isBackquoteCodeBlock) {
-          isBackquoteCodeBlock = false
-        } else {
-          isBackquoteCodeBlock = true
-        }
+    for (let n = 0; n < lines.length; n++) {
+      const line = lines[n]
+      if (backquoteFenceReg.test(line)) {
+        isBackquoteCodeBlock = !isBackquoteCodeBlock
       }
-      if (lines[n].match(/^[ \t]*~~~/)) {
-        if (isTildeCodeBlock) {
-          isTildeCodeBlock = false
-        } else {
-          isTildeCodeBlock = true
-        }
+      if (tildeFenceReg.test(line)) {
+        isTildeCodeBlock = !isTildeCodeBlock
       }
       if (isBackquoteCodeBlock || isTildeCodeBlock) {
-        n++
         continue
       }
   
-      if (n === 0) {
-        isPrevBreakLine = true
-      } else {
-        isPrevBreakLine = /^[ \t]*$/.test(lines[n-1])
-      }
-      if (n === lines.length -1) {
-        isNextBreakLine = true
-      } else {
-        isNextBreakLine = /^[ \t]*$/.test(lines[n+1])
-      }
+      const isPrevBreakLine = (n === 0) ? true : blankLineReg.test(lines[n-1])
+      const isNextBreakLine = (n === lines.length -1) ? true : blankLineReg.test(lines[n+1])
       if (isPrevBreakLine && isNextBreakLine) {
-        lines[n] = modLines(n ,lines, br, opt)
+        if (line.indexOf('![') !== -1 && line.indexOf('](') !== -1) {
+          if (!autoLangChecked) {
+            const imgLine = line.match(imageLineReg)
+            if (imgLine) {
+              const rawText = getCaptionTextForDetection(imgLine, opt).trim()
+              if (rawText) {
+                const detected = detectAutoLang(rawText)
+                if (detected) {
+                  opt.labelLang = detected
+                }
+              }
+              autoLangChecked = true
+            }
+          }
+          if (!labelMeta && (!opt.autoLangDetection || autoLangChecked)) {
+            labelMeta = buildLabelMeta(opt)
+          }
+          if (labelMeta) {
+            lines[n] = modLines(n ,lines, br, opt, labelMeta)
+          }
+        }
       }
-      n++
     }
   
-    n = 0
-    markdown = ''
-    while (n < lines.length) {
-      if (n === lines.length - 1) {
-        markdown += lines[n]
-        break
+    const output = []
+    for (let n = 0; n < lines.length; n++) {
+      output.push(lines[n])
+      if (n < lines.length - 1) {
+        output.push(lineBreaks[n] || br)
       }
-      markdown += lines[n] + lineBreaks[n]
-      n++
     }
-    return markdown
+    return output.join('')
   }
   
-  const modLines = (n, lines, br, opt) => {
-  
-    const markAfterNum = '[A-Z0-9]{1,6}(?:[.-][A-Z0-9]{1,6}){0,5}';
-    const joint = '[.:．。：　]';
-    const jointFullWidth = '[．。：　]';
-    const jointHalfWidth = '[.:]';
-  
-    const markAfterEn = '(?:' +
-      ' *(?:' +
-        jointHalfWidth + '(?:(?=[ ]+)|$)|' +
-        jointFullWidth + '|' +
-        '(?=[ ]+[^0-9a-zA-Z])' +
-      ')|' +
-      ' *' + '(' + markAfterNum + ')(?:' +
-        jointHalfWidth + '(?:(?=[ ]+)|$)|' +
-        jointFullWidth + '|' +
-        '(?=[ ]+[^a-z])|$' +
-      ')|' +
-      '[.](' + markAfterNum + ')(?:' +
-        joint + '|(?=[ ]+[^a-z])|$' +
-      ')' +
-    ')';
-    const markAfterJa = '(?:' +
-    ' *(?:' +
-      jointHalfWidth + '(?:(?=[ ]+)|$)|' +
-      jointFullWidth + '|' +
-      '(?=[ ]+)' +
-    ')|' +
-    ' *' + '(' + markAfterNum + ')(?:' +
-      jointHalfWidth + '(?:(?=[ ]+)|$)|' +
-      jointFullWidth + '|' +
-      '(?=[ ]+)|$' +
-    ')' +
-  ')';
-  
-    const labelEn = '(?:[fF][iI][gG](?:[uU][rR][eE])?|[iI][lL]{2}[uU][sS][tT]|[pP][hH][oO][tT][oO])';
-    const labelJa = '(?:図|イラスト|写真)';
-  
-    const markReg = {
-      //fig(ure)?, illust, photo
-      "img": new RegExp('^(?:' + labelEn + markAfterEn + '|' + labelJa + markAfterJa +
-      ')'),
-    }
-    const markRegWithNoJoint = {
-      "img": new RegExp('^(' + labelEn + '|' + labelJa + ')([ .]?' + markAfterNum + ')?$'),
-    }
-  
-    let reg = /^([ \t]*?)!\[ *?(.*?) *?\]\(([^ ]*?)( +"(.*?)")?\)( *(?:{.*?})?)$/
-  
-    const imgLine = lines[n].match(reg)
+  const modLines = (n, lines, br, opt, labelMeta) => {
+    const imgLine = lines[n].match(imageLineReg)
     if (!imgLine) return lines[n]
     //console.log(imgLine)
   
-    let hasLabel
-    if (opt.imgAltCaption) hasLabel = imgLine[2].match(new RegExp(markReg.img))
-    if (opt.imgTitleCaption) hasLabel = imgLine[5].match(new RegExp(markReg.img))
-    let hasLabelWithNoJoint
-    if (opt.imgAltCaption) hasLabelWithNoJoint = imgLine[2].match(new RegExp(markRegWithNoJoint.img))
-    if (opt.imgTitleCaption) hasLabelWithNoJoint = imgLine[5].match(new RegExp(markRegWithNoJoint.img))
+    const captionText = getCaptionText(imgLine, opt)
+    const hasLabel = captionText ? captionText.match(markReg.img) : null
+    const hasLabelWithNoJoint = captionText && labelOnlyReg ? captionText.match(labelOnlyReg) : null
 
     lines[n] = imgLine[1]
     if (hasLabel) {
@@ -154,36 +320,22 @@ const setMarkdownImgAttrToPCaption = (markdown, option) => {
       } else if (opt.imgTitleCaption) {
         lines[n] += imgLine[5]
       }
-      lines[n] += br + br +  imgLine[1] + '![' + hasLabelWithNoJoint[0].replace(new RegExp(joint + '$')) + ']'
+      lines[n] += br + br +  imgLine[1] + '![' + hasLabelWithNoJoint[0].replace(jointSuffixReg, '') + ']'
     } else {
       //console.log('No label::')
-      if (opt.labelLang === 'ja') {
-        if (opt.imgAltCaption) {
-          if (imgLine[2]) {
-            lines[n] += '図　' + imgLine[2] + br + br + imgLine[1] + '![]'
-          } else {
-            lines[n] += '図' + br + br + imgLine[1] + '![]'
-          }
-        } else if (opt.imgTitleCaption) {
-          if (imgLine[5]) {
-            lines[n] += '図　' + imgLine[5] + br + br + imgLine[1] + '![' + imgLine[2] + ']'
-          } else {
-            lines[n] += '図' + br + br + imgLine[1] + '![' + imgLine[2] + ']'
-          }
+      const hasCaption = captionText !== ''
+      const labelPrefix = buildLabelPrefix(labelMeta, hasCaption)
+      if (opt.imgAltCaption) {
+        if (hasCaption) {
+          lines[n] += labelPrefix + captionText + br + br + imgLine[1] + '![]'
+        } else {
+          lines[n] += labelPrefix + br + br + imgLine[1] + '![]'
         }
-      } else if (opt.labelLang === 'en') {
-        if (opt.imgAltCaption) {
-          if (imgLine[2]) {
-            lines[n] += 'Figure. ' + imgLine[2] + br + br + imgLine[1] +'![]'
-          } else {
-            lines[n] += 'Figure.' + br + br + imgLine[1] +'![]'
-          }
-        } else if (opt.imgTitleCaption) {
-          if (imgLine[5]) {
-            lines[n] += 'Figure. ' + imgLine[5] + br + br + imgLine[1] + '![' + imgLine[2] + ']'
-          } else {
-            lines[n] += 'Figure. ' + br + br + imgLine[1] + '![' + imgLine[2] + ']'
-          }
+      } else if (opt.imgTitleCaption) {
+        if (hasCaption) {
+          lines[n] += labelPrefix + captionText + br + br + imgLine[1] + '![' + imgLine[2] + ']'
+        } else {
+          lines[n] += labelPrefix + br + br + imgLine[1] + '![' + imgLine[2] + ']'
         }
       }
     }

@@ -16,5 +16,8 @@
   "bugs": {
     "url": "https://github.com/peaceroad/markdown-imgattr-to-pcaption/issues"
   },
-  "homepage": "https://github.com/peaceroad/markdown-imgattr-to-pcaption#readme"
+  "homepage": "https://github.com/peaceroad/markdown-imgattr-to-pcaption#readme",
+  "dependencies": {
+    "p7d-markdown-it-p-captions": "^0.20.0"
+  }
 }
