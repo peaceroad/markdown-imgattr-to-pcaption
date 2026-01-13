@@ -8,33 +8,6 @@ import setMarkdownImgAttrToPCaption from '@peaceroad/markdown-imgattr-to-pcaptio
 setMarkdownImgAttrToPCaption(markdownCont)
 ```
 
-## Browser DOM helper (live preview)
-
-This package also provides a DOM helper to turn image alt/title into `<figure><figcaption>` on the fly.
-It is useful for live preview environments that do not re-run markdown-it on each edit.
-This helper does not insert label prefixes; it uses the raw alt/title text as the caption.
-
-```html
-<script type="module">
-import setImgFigureCaption from '@peaceroad/markdown-imgattr-to-pcaption/script/set-img-figure-caption.js'
-
-await setImgFigureCaption({
-  imgAltCaption: true,
-  imgTitleCaption: false,
-  observe: true
-})
-</script>
-```
-
-### DOM helper options
-
-- `imgAltCaption` (boolean|string): use `alt` text as caption (strings are treated as true)
-- `imgTitleCaption` (boolean|string): use `title` text as caption (strings are treated as true)
-- `preferAlt` (boolean): when both are enabled, prefer alt (default true)
-- `figureClass` (string): class name for created figures (default `f-img`)
-- `readMeta` (boolean): read `<meta name="markdown-frontmatter">` and apply `imgAltCaption` / `imgTitleCaption`
-- `observe` (boolean): re-run on DOM changes (MutationObserver)
-
 ```
 [Input]
 段落。段落。段落。
@@ -194,3 +167,30 @@ setMarkdownImgAttrToPCaption(markdownCont, {
 - Skips fenced code blocks (``` or ~~~).
 - Label detection uses `p7d-markdown-it-p-captions` label patterns (en/ja by default). `labelSet` only affects auto-inserted labels when no label is detected.
 - `autoLangDetection` inspects the first eligible image line and uses the caption text (title when `imgTitleCaption: true`, otherwise alt). If the caption text is empty, it falls back to alt.
+
+## Browser DOM helper (live preview)
+
+This package also provides a DOM helper to turn image alt/title into `<figure><figcaption>` on the fly.
+It is useful for live preview environments that do not re-run markdown-it on each edit.
+This helper does not insert label prefixes; it uses the raw alt/title text as the caption.
+
+```html
+<script type="module">
+import setImgFigureCaption from '@peaceroad/markdown-imgattr-to-pcaption/script/set-img-figure-caption.js'
+
+await setImgFigureCaption({
+  imgAltCaption: true,
+  imgTitleCaption: false,
+  observe: true
+})
+</script>
+```
+
+### DOM helper options
+
+- `imgAltCaption` (boolean|string): use `alt` text as caption (strings are treated as true)
+- `imgTitleCaption` (boolean|string): use `title` text as caption (strings are treated as true)
+- `preferAlt` (boolean): when both are enabled, prefer alt (default true)
+- `figureClass` (string): class name for created figures (default `f-img`)
+- `readMeta` (boolean): read `<meta name="markdown-frontmatter">` and apply `imgAltCaption` / `imgTitleCaption`
+- `observe` (boolean): re-run on DOM changes (MutationObserver)
