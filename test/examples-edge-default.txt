@@ -1,0 +1,137 @@
+[Input]
+Paragraph.
+![A caption](image.jpg)
+
+Paragraph.
+
+[Output]
+Paragraph.
+![A caption](image.jpg)
+
+Paragraph.
+
+[Input]
+Inline ![A caption](image.jpg) text.
+
+- ![A caption](image.jpg)
+
+[Output]
+Inline ![A caption](image.jpg) text.
+
+- ![A caption](image.jpg)
+
+[Input]
+Paragraph.
+
+![A caption](image file.jpg)
+
+Paragraph.
+
+[Output]
+Paragraph.
+
+![A caption](image file.jpg)
+
+Paragraph.
+
+[Input]
+Paragraph.
+
+  ![A caption](image.jpg){.w}
+
+Paragraph.
+
+[Output]
+Paragraph.
+
+  Figure. A caption
+
+  ![](image.jpg){.w}
+
+Paragraph.
+
+[Input]
+Paragraph.
+
+![猫](a.jpg)
+
+Paragraph.
+
+![Dog](b.jpg)
+
+Paragraph.
+
+[Output]
+Paragraph.
+
+図　猫
+
+![](a.jpg)
+
+Paragraph.
+
+図　Dog
+
+![](b.jpg)
+
+Paragraph.
+
+[Input]
+```markdown
+
+![A caption](image.jpg)
+
+```   
+
+![A caption](image2.jpg)
+
+[Output]
+```markdown
+
+![A caption](image.jpg)
+
+```   
+
+Figure. A caption
+
+![](image2.jpg)
+
+[Input]
+$$ not-fence
+
+![A caption](image.jpg)
+
+Paragraph.
+
+[Output]
+$$ not-fence
+
+Figure. A caption
+
+![](image.jpg)
+
+Paragraph.
+
+[Input]
+```
+![A caption](image.jpg)
+Paragraph.
+
+[Output]
+```
+![A caption](image.jpg)
+Paragraph.
+
+[Input]
+# Title
+
+Paragraph only.
+
+[Output]
+# Title
+
+Paragraph only.
+
+[Input]
+
+[Output]

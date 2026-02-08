@@ -1,0 +1,15 @@
+[Input]
+Paragraph.
+
+![猫](image.jpg "")
+
+Paragraph.
+
+[Output]
+Paragraph.
+
+図
+
+![猫](image.jpg)
+
+Paragraph.

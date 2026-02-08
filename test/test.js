@@ -1,14 +1,13 @@
 import assert from 'assert'
 import fs from 'fs'
 import path from 'path'
+import { fileURLToPath } from 'url'
 import setMarkdownImgAttrToPCaption from '../index.js'
 import setImgFigureCaption from '../script/set-img-figure-caption.js'
+import { runCoreSpecialTests } from './core-special-tests.js'
+import { runDomTests } from './dom-tests.js'
 
-let __dirname = path.dirname(new URL(import.meta.url).pathname)
-const isWindows = (process.platform === 'win32')
-if (isWindows) {
-  __dirname = __dirname.replace(/^\/+/, '').replace(/\//g, '\\')
-}
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 class TestElement {
   constructor(tagName, ownerDocument) {
@@ -27,6 +26,14 @@ class TestElement {
 
   setAttribute(name, value) {
     this._attributes.set(name, String(value))
+  }
+
+  removeAttribute(name) {
+    this._attributes.delete(name)
+  }
+
+  hasAttribute(name) {
+    return this._attributes.has(name)
   }
 
   appendChild(node) {
@@ -125,120 +132,153 @@ class TestDocument {
   }
 }
 
+class TestMutationObserver {
+  static instances = []
+
+  constructor(callback) {
+    this.callback = callback
+    this.disconnected = false
+    TestMutationObserver.instances.push(this)
+  }
+
+  observe() {}
+
+  disconnect() {
+    this.disconnected = true
+  }
+
+  trigger(mutations) {
+    this.callback(mutations)
+  }
+
+  static reset() {
+    TestMutationObserver.instances = []
+  }
+}
+
 let hasFailure = false
 
-const check = (name, ex) => {
-  const exCont = fs.readFileSync(ex, 'utf-8').trim()
-  let ms = [];
-  let ms0 = exCont.split(/\n*\[Input\]\n/)
-  let n = 1;
-  while(n < ms0.length) {
-    let mhs = ms0[n].split(/\n+\[Output[^\]]*?\]\n/)
-    let i = 1
-    while (i < 2) {
-      if (mhs[i] === undefined) {
-        mhs[i] = ''
-      } else {
-        mhs[i] = mhs[i].replace(/$/,'\n')
-      }
-      i++
-    }
-    ms[n] = {
-      inputMarkdown: mhs[0].trim(),
-      outputMarkdown: mhs[1].trim(),
-    };
-    n++
+const markFailure = () => {
+  hasFailure = true
+}
+
+const trimSingleEdgeNewline = (value) => {
+  if (typeof value !== 'string') return ''
+  let next = value
+  if (next.startsWith('\n')) next = next.slice(1)
+  if (next.endsWith('\n')) next = next.slice(0, -1)
+  return next
+}
+
+const readFixtureCases = (fixturePath) => {
+  const fixtureContent = fs.readFileSync(fixturePath, 'utf-8').replace(/\r\n/g, '\n')
+  const sections = fixtureContent.split(/\n*\[Input\]\n/)
+  const cases = []
+
+  for (let n = 1; n < sections.length; n++) {
+    const parts = sections[n].split(/\n+\[Output[^\]]*?\]\n?/)
+    const inputMarkdown = trimSingleEdgeNewline(parts[0] || '')
+    const outputMarkdown = trimSingleEdgeNewline(parts[1] || '')
+    cases.push({ inputMarkdown, outputMarkdown })
   }
 
-  n = 1
-  while(n < ms.length) {
-    //if (n !== 10) { n++; continue }
-    console.log('Test: ' + n + ' >>>')
-    const m = ms[n].inputMarkdown
-    let h
-    let option = {}
-    if (name === 'default') {
-        h = setMarkdownImgAttrToPCaption(m)
-      }
-  
+  return cases
+}
 
-      if (name === 'imgTitleAttr') {
-        h = setMarkdownImgAttrToPCaption(m, {imgTitleCaption: true})
-      }
+const fixtureSuites = {
+  default: {
+    file: path.join(__dirname, 'examples.txt'),
+    option: {},
+  },
+  imgTitleAttr: {
+    file: path.join(__dirname, 'examples-img-title-attr.txt'),
+    option: { imgTitleCaption: true },
+  },
+  labelLang: {
+    file: path.join(__dirname, 'examples-label-lang.txt'),
+    option: { labelLang: 'ja', autoLangDetection: false },
+  },
+  autoLangDetection: {
+    file: path.join(__dirname, 'examples-auto-lang-detection.txt'),
+    option: { autoLangDetection: true },
+  },
+  labelSet: {
+    file: path.join(__dirname, 'examples-label-set.txt'),
+    option: {
+      labelSet: { label: '図', joint: '：', space: '　' },
+    },
+  },
+  labelSetMap: {
+    file: path.join(__dirname, 'examples-label-set-map.txt'),
+    option: {
+      labelLang: 'en',
+      labelSet: {
+        en: { label: 'Fig', joint: ':', space: ' ' },
+      },
+    },
+  },
+  labelSetFallback: {
+    file: path.join(__dirname, 'examples-label-set-fallback.txt'),
+    option: {
+      labelLang: 'fr',
+      autoLangDetection: false,
+      labelSet: {
+        en: { label: 'Fig', joint: ':', space: ' ' },
+        ja: { label: '図', joint: '　', space: '' },
+      },
+    },
+  },
+  edgeDefault: {
+    file: path.join(__dirname, 'examples-edge-default.txt'),
+    option: {},
+  },
+  edgeImgTitleAutoLang: {
+    file: path.join(__dirname, 'examples-edge-img-title-auto-lang.txt'),
+    option: { imgTitleCaption: true, autoLangDetection: true },
+  },
+}
 
-      if (name === 'labelLang') {
-        h = setMarkdownImgAttrToPCaption(m, {labelLang: 'ja', autoLangDetection: false})
-      }
+const runFixtureSuite = (suiteName, suiteDef) => {
+  const fixtureCases = readFixtureCases(suiteDef.file)
+  console.log('[' + suiteName + '] >>> ' + suiteDef.file)
 
-      if (name === 'autoLangDetection') {
-        h = setMarkdownImgAttrToPCaption(m, {autoLangDetection: true})
-      }
+  for (let n = 0; n < fixtureCases.length; n++) {
+    const caseNo = n + 1
+    const testCase = fixtureCases[n]
+    console.log('Test: ' + caseNo + ' >>>')
 
-      if (name === 'labelSet') {
-        h = setMarkdownImgAttrToPCaption(m, {
-          labelSet: { label: '図', joint: '：', space: '　' }
-        })
-      }
-
-      if (name === 'labelSetMap') {
-        h = setMarkdownImgAttrToPCaption(m, {
-          labelLang: 'en',
-          labelSet: {
-            en: { label: 'Fig', joint: ':', space: ' ' }
-          }
-        })
-      }
-
-      if (name === 'labelSetFallback') {
-        h = setMarkdownImgAttrToPCaption(m, {
-          labelLang: 'fr',
-          autoLangDetection: false,
-          labelSet: {
-            en: { label: 'Fig', joint: ':', space: ' ' },
-            ja: { label: '図', joint: '　', space: '' }
-          }
-        })
-      }
-
+    const converted = setMarkdownImgAttrToPCaption(testCase.inputMarkdown, suiteDef.option)
     try {
-      assert.strictEqual(h, ms[n].outputMarkdown)
-    } catch(e) {
-      hasFailure = true
-      console.log('incorrect: ')
-      //console.log(m)
-      //console.log('::convert ->')
-      console.log('H: ' + h +'\n\nC: ' + ms[n].outputMarkdown)
+      assert.strictEqual(converted, testCase.outputMarkdown)
+    } catch (error) {
+      markFailure()
+      console.log('incorrect:')
+      console.log('H: ' + converted + '\n\nC: ' + testCase.outputMarkdown)
+      if (error && error.stack) {
+        console.log(error.stack)
+      }
     }
-    n++
   }
 }
 
-
-const example = {
-    default: __dirname + path.sep + 'examples.txt',
-    imgTitleAttr: __dirname + path.sep + 'examples-img-title-attr.txt',
-    labelLang: __dirname + path.sep + 'examples-label-lang.txt',
-    autoLangDetection: __dirname + path.sep + 'examples-auto-lang-detection.txt',
-    labelSet: __dirname + path.sep + 'examples-label-set.txt',
-    labelSetMap: __dirname + path.sep + 'examples-label-set-map.txt',
-    labelSetFallback: __dirname + path.sep + 'examples-label-set-fallback.txt',
-}
-for (let ex in example) {
-  console.log('[Test] ' + ex)
-  check(ex, example[ex])
-}
-
-if (hasFailure) {
-  process.exitCode = 1
+const runCoreTest = (name, fn) => {
+  try {
+    fn()
+    console.log('[coreSpecial] ' + name + ' >>>')
+  } catch (error) {
+    markFailure()
+    console.log('[coreSpecial] failed: ' + name)
+    console.log(error && error.message ? error.message : error)
+  }
 }
 
 const runDomTest = async (name, fn) => {
   try {
     await fn()
-    console.log('DOM Test: ' + name + ' >>>')
+    console.log('[dom] ' + name + ' >>>')
   } catch (error) {
-    hasFailure = true
-    console.log('DOM Test failed: ' + name)
+    markFailure()
+    console.log('[dom] failed: ' + name)
     console.log(error && error.message ? error.message : error)
   }
 }
@@ -258,60 +298,48 @@ const withDocument = async (fn) => {
   }
 }
 
-await runDomTest('wraps image and caption', async () => {
-  await withDocument(async (doc) => {
-    const img = doc.createElement('img')
-    img.setAttribute('alt', 'Caption')
-    doc.body.appendChild(img)
+const withMutationObserver = async (fn) => {
+  const previousMutationObserver = global.MutationObserver
+  const previousRequestAnimationFrame = global.requestAnimationFrame
+  TestMutationObserver.reset()
+  global.MutationObserver = TestMutationObserver
+  global.requestAnimationFrame = (callback) => {
+    callback()
+    return 1
+  }
 
-    await setImgFigureCaption({ imgAltCaption: true })
+  try {
+    await fn(TestMutationObserver)
+  } finally {
+    if (previousMutationObserver === undefined) {
+      delete global.MutationObserver
+    } else {
+      global.MutationObserver = previousMutationObserver
+    }
+    if (previousRequestAnimationFrame === undefined) {
+      delete global.requestAnimationFrame
+    } else {
+      global.requestAnimationFrame = previousRequestAnimationFrame
+    }
+  }
+}
 
-    const figure = doc.body.querySelector('figure')
-    assert.ok(figure, 'figure should be created')
-    const figcaption = figure.querySelector('figcaption')
-    assert.ok(figcaption, 'figcaption should be created')
-    assert.strictEqual(figcaption.textContent, 'Caption')
-    assert.strictEqual(figure.childNodes[0].tagName, 'IMG')
-  })
-})
+for (const suiteName of Object.keys(fixtureSuites)) {
+  runFixtureSuite(suiteName, fixtureSuites[suiteName])
+}
 
-await runDomTest('updates existing caption', async () => {
-  await withDocument(async (doc) => {
-    const figure = doc.createElement('figure')
-    const img = doc.createElement('img')
-    img.setAttribute('alt', 'New caption')
-    const caption = doc.createElement('figcaption')
-    caption.textContent = 'Old caption'
-    figure.appendChild(img)
-    figure.appendChild(caption)
-    doc.body.appendChild(figure)
+runCoreSpecialTests({ runCoreTest, assert, setMarkdownImgAttrToPCaption })
 
-    await setImgFigureCaption({ imgAltCaption: true })
-
-    const figcaption = figure.querySelector('figcaption')
-    assert.ok(figcaption, 'figcaption should exist')
-    assert.strictEqual(figcaption.textContent, 'New caption')
-  })
-})
-
-await runDomTest('removes caption when blank', async () => {
-  await withDocument(async (doc) => {
-    const figure = doc.createElement('figure')
-    const img = doc.createElement('img')
-    img.setAttribute('alt', '')
-    const caption = doc.createElement('figcaption')
-    caption.textContent = 'To remove'
-    figure.appendChild(img)
-    figure.appendChild(caption)
-    doc.body.appendChild(figure)
-
-    await setImgFigureCaption({ imgAltCaption: true })
-
-    const figcaption = figure.querySelector('figcaption')
-    assert.strictEqual(figcaption, null)
-  })
+await runDomTests({
+  runDomTest,
+  withDocument,
+  withMutationObserver,
+  assert,
+  setImgFigureCaption,
 })
 
 if (hasFailure) {
   process.exitCode = 1
+} else {
+  console.log('\nPassed all test.')
 }

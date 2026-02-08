@@ -1,158 +1,76 @@
 # markdown-imgattr-to-pcaption
 
-Change img alt attribute to figure caption paragraph for p7d-markdown-it-p-captions.
+Convert image alt/title text into caption paragraphs that work with
+`p7d-markdown-it-p-captions`.
 
+## Install
+
+```bash
+npm i @peaceroad/markdown-imgattr-to-pcaption
 ```
+
+## Markdown transformer (`index.js`)
+
+### Usage
+
+```js
 import setMarkdownImgAttrToPCaption from '@peaceroad/markdown-imgattr-to-pcaption'
 
-setMarkdownImgAttrToPCaption(markdownCont)
+const out = setMarkdownImgAttrToPCaption(markdown)
 ```
 
+### Example
+
+Input:
+
+```md
+Paragraph.
+
+![A caption](image.jpg)
+
+Paragraph.
 ```
-[Input]
-段落。段落。段落。
 
-![キャプション](image.jpg)
+Output:
 
-段落。段落。段落。
+```md
+Paragraph.
 
-
-[Output]
-段落。段落。段落。
-
-図　キャプション
+Figure. A caption
 
 ![](image.jpg)
 
-段落。段落。段落。
-
-
-[Input]
-段落。段落。段落。
-
-![図 キャプション](image.jpg)
-
-段落。段落。段落。
-
-[Output]
-段落。段落。段落。
-
-図 キャプション
-
-![](image.jpg)
-
-段落。段落。段落。
-
-
-
-[Input]
-段落。段落。段落。
-
-![図1 キャプション](image.jpg)
-
-段落。段落。段落。
-
-[Output]
-段落。段落。段落。
-
-図1 キャプション
-
-![](image.jpg)
-
-段落。段落。段落。
+Paragraph.
 ```
 
-## Option
+### Options
 
-### imgTitleCaption
+- `imgTitleCaption` (`boolean`, default: `false`)
+  - Use image `title` as caption source.
+  - When enabled, `imgAltCaption` behavior is disabled.
+- `labelLang` (`string`, default: `en`)
+  - Default label language (`en`/`ja` out of the box).
+- `autoLangDetection` (`boolean`, default: `true`)
+  - Detect language from the first eligible image caption.
+  - `ja` if Japanese characters exist.
+  - `en` if ASCII letters exist.
+  - Otherwise keeps the current `labelLang`.
+- `labelSet` (`object|null`, default: `null`)
+  - Override generated `label` / `joint` / `space`.
+  - Supports single config or per-language map.
 
-Default: false.
+Single config example:
 
-```
-[Input]
-段落。段落。段落。
-
-![ALT](image.jpg "キャプション")
-
-段落。段落。段落。
-
-
-[Output]
-段落。段落。段落。
-
-図　キャプション
-
-![ALT](image.jpg)
-
-段落。段落。段落。
-```
-
-### labelLang
-
-Default: 'en'.
-
-```
-[Input]
-段落。段落。段落。
-
-![キャプション](image.jpg)
-
-段落。段落。段落。
-
-
-[Output]
-段落。段落。段落。
-
-図　キャプション
-
-![](image.jpg)
-
-段落。段落。段落。
-```
-
-### autoLangDetection
-
-Default: true. To force a specific `labelLang`, set `autoLangDetection: false`.
-When `autoLangDetection` is true, it can override an explicitly set `labelLang` (it is treated as the fallback when detection cannot decide).
-
-Detect `labelLang` from the first image caption line. If the caption text contains Japanese characters, it sets `labelLang: 'ja'`. Otherwise, if the caption contains ASCII letters, it sets `labelLang: 'en'` (symbols/emoji are ignored). If the caption contains non-ASCII letters such as accents, the existing `labelLang` is left unchanged.
-
-Example (non-ASCII letters keep the current `labelLang`):
-
-```
-[Input]
-段落。
-
-![Café](image.jpg)
-
-段落。
-
-[Output]
-段落。
-
-Figure. Café
-
-![](image.jpg)
-
-段落。
-```
-Only `ja` and `en` are auto-detected. For other languages, set `labelLang` explicitly (and use `labelSet` as needed) or leave auto-detection off.
-Detection runs only once on the first eligible image line; subsequent images do not affect the language choice.
-
-### labelSet
-
-Override the auto-inserted label, joint, and space for captions without labels (useful for other languages).
-`labelSet` accepts either a single config for the current `labelLang` or a per-language map.
-If a matching language entry is not found, the default (English) label config is used.
-
-```
-setMarkdownImgAttrToPCaption(markdownCont, {
+```js
+setMarkdownImgAttrToPCaption(markdown, {
   labelSet: { label: '図', joint: '：', space: '　' }
 })
 ```
 
-```
-setMarkdownImgAttrToPCaption(markdownCont, {
+Per-language config example:
+
+```js
+setMarkdownImgAttrToPCaption(markdown, {
   labelSet: {
     en: { label: 'Figure', joint: '.', space: ' ' },
     ja: { label: '図', joint: '　', space: '' },
@@ -161,18 +79,17 @@ setMarkdownImgAttrToPCaption(markdownCont, {
 })
 ```
 
-## Notes
+### Conversion rules
 
-- Only converts images that are on a single line and surrounded by blank lines. Inline images or list items are not changed.
-- Skips fenced code blocks (``` or ~~~).
-- Label detection uses `p7d-markdown-it-p-captions` label patterns (en/ja by default). `labelSet` only affects auto-inserted labels when no label is detected.
-- `autoLangDetection` inspects the first eligible image line and uses the caption text (title when `imgTitleCaption: true`, otherwise alt). If the caption text is empty, it falls back to alt.
+- Converts only single-line image syntax surrounded by blank lines.
+- Skips fenced code blocks (``` and ~~~).
+- Skips display math fence blocks using `$` markers (`$$ ... $$`, `$$$$ ... $$$$`, etc.).
+- Uses `p7d-markdown-it-p-captions` label patterns for label detection.
+- `autoLangDetection` runs once on the first eligible image.
 
-## Browser DOM helper (live preview)
+## Browser DOM helper (`script/set-img-figure-caption.js`)
 
-This package also provides a DOM helper to turn image alt/title into `<figure><figcaption>` on the fly.
-It is useful for live preview environments that do not re-run markdown-it on each edit.
-This helper does not insert label prefixes; it uses the raw alt/title text as the caption.
+### Usage
 
 ```html
 <script type="module">
@@ -181,16 +98,41 @@ import setImgFigureCaption from '@peaceroad/markdown-imgattr-to-pcaption/script/
 await setImgFigureCaption({
   imgAltCaption: true,
   imgTitleCaption: false,
-  observe: true
+  observe: true,
 })
 </script>
 ```
 
-### DOM helper options
+### Behavior
 
-- `imgAltCaption` (boolean|string): use `alt` text as caption (strings are treated as true)
-- `imgTitleCaption` (boolean|string): use `title` text as caption (strings are treated as true)
-- `preferAlt` (boolean): when both are enabled, prefer alt (default true)
-- `figureClass` (string): class name for created figures (default `f-img`)
-- `readMeta` (boolean): read `<meta name="markdown-frontmatter">` and apply `imgAltCaption` / `imgTitleCaption`
-- `observe` (boolean): re-run on DOM changes (MutationObserver)
+- Mirrors label/caption decisions from markdown transformer.
+- In `observe` mode, keeps one observer per document.
+- Uses internal source cache for stable reprocessing without extra DOM attributes.
+- Re-detects language when first-image context changes.
+
+### Options
+
+- `imgAltCaption` (`boolean|string`, default: `true`)
+- `imgTitleCaption` (`boolean|string`, default: `false`)
+- `labelLang` (`string`, default: `en`)
+- `autoLangDetection` (`boolean`, default: `true`)
+- `labelSet` (`object|null`, default: `null`)
+- `figureClass` (`string`, default: `f-img`)
+- `readMeta` (`boolean`, default: `false`)
+- `observe` (`boolean`, default: `false`)
+
+## Limitations
+
+- Only single-line inline image syntax is supported.
+  - Supported forms include `![alt](url "title")` and `![alt](url (title))`.
+- Multi-line image link syntax is out of scope.
+- Complex `alt` text patterns that rely on raw `](` are out of scope.
+- Indented code blocks (4 spaces or tab) are out of scope.
+  - Use fenced code blocks if you need guaranteed skip behavior.
+- Some non-inline image styles (for example reference-style edge cases) are out of scope.
+
+## Related plugin
+
+If you use markdown-it figure/caption flows, see:
+
+- `@peaceroad/markdown-it-figure-with-p-caption`
