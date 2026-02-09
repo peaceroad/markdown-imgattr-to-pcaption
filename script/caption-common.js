@@ -15,18 +15,19 @@ const DEFAULT_LABEL_CONFIG_MAP = {
   en: { label: 'Figure', joint: '.', space: ' ' },
   ja: { label: '図', joint: '　', space: '' },
 }
+const LANG_KEYS = Object.keys(langSets)
+const lowercaseAsciiLetterReg = /([a-z])/g
 
 const buildLabelOnlyReg = () => {
-  const langs = Object.keys(langSets)
-  if (langs.length === 0) return null
+  if (LANG_KEYS.length === 0) return null
 
   const patterns = []
-  for (const lang of langs) {
+  for (const lang of LANG_KEYS) {
     const data = langSets[lang]
     if (!data || !data.markReg || !data.markReg.img) continue
     let pattern = data.markReg.img
     if (data.type && data.type['inter-word-space']) {
-      pattern = pattern.replace(/([a-z])/g, (match) => '[' + match + match.toUpperCase() + ']')
+      pattern = pattern.replace(lowercaseAsciiLetterReg, (match) => '[' + match + match.toUpperCase() + ']')
     }
     patterns.push(pattern)
   }
@@ -37,7 +38,7 @@ const buildLabelOnlyReg = () => {
 
 export const labelOnlyReg = buildLabelOnlyReg()
 export const jointSuffixReg = new RegExp(joint + '$')
-const captionMarkReg = getMarkRegForLanguages(Object.keys(langSets))
+const captionMarkReg = getMarkRegForLanguages(LANG_KEYS)
 export const captionMarkRegImg = captionMarkReg ? captionMarkReg.img : null
 
 const isAsciiOnly = (value) => asciiOnlyReg.test(value)
@@ -86,35 +87,37 @@ const getInterWordSpace = (labelLang, labelText) => {
 const normalizeLabelConfig = (value) => {
   if (!value || typeof value !== 'object') return null
   const config = {}
+  let hasConfig = false
   const labelValue = (typeof value.label === 'string')
     ? value.label
     : (typeof value.lable === 'string' ? value.lable : undefined)
   if (labelValue !== undefined) {
     config.label = labelValue
+    hasConfig = true
   }
   if (Object.prototype.hasOwnProperty.call(value, 'joint')) {
     config.joint = String(value.joint)
+    hasConfig = true
   }
   if (Object.prototype.hasOwnProperty.call(value, 'space')) {
     config.space = String(value.space)
+    hasConfig = true
   }
-  if (Object.keys(config).length === 0) return null
+  if (!hasConfig) return null
   return config
 }
 
-const mergeLabelConfig = (base, override) => {
-  if (!override) return base
-  const merged = { ...base }
+const applyLabelConfig = (base, override) => {
+  if (!override) return
   if (Object.prototype.hasOwnProperty.call(override, 'label')) {
-    merged.label = override.label
+    base.label = override.label
   }
   if (Object.prototype.hasOwnProperty.call(override, 'joint')) {
-    merged.joint = override.joint
+    base.joint = override.joint
   }
   if (Object.prototype.hasOwnProperty.call(override, 'space')) {
-    merged.space = override.space
+    base.space = override.space
   }
-  return merged
 }
 
 const getDefaultLabelConfig = (labelLang) => {
@@ -123,7 +126,7 @@ const getDefaultLabelConfig = (labelLang) => {
 }
 
 export const resolveLabelConfig = (opt) => {
-  let config = getDefaultLabelConfig(opt.labelLang)
+  const config = getDefaultLabelConfig(opt.labelLang)
   let mapConfig = null
   let singleConfig = null
   if (opt.labelSet && typeof opt.labelSet === 'object') {
@@ -132,8 +135,8 @@ export const resolveLabelConfig = (opt) => {
       mapConfig = normalizeLabelConfig(opt.labelSet[opt.labelLang])
     }
   }
-  config = mergeLabelConfig(config, mapConfig)
-  config = mergeLabelConfig(config, singleConfig)
+  applyLabelConfig(config, mapConfig)
+  applyLabelConfig(config, singleConfig)
 
   if (!config.label) {
     config.label = DEFAULT_LABEL_CONFIG_MAP.en.label

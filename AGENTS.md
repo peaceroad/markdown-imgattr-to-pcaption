@@ -23,6 +23,7 @@ This file documents the current implementation workflow so contributors can keep
 
 1. Normalize runtime options.
    - Defaults: `imgAltCaption: true`, `imgTitleCaption: false`, `labelLang: 'en'`, `autoLangDetection: true`.
+   - Boolean flags accept boolean values only; non-boolean values are ignored.
    - If `imgTitleCaption` is enabled, `imgAltCaption` is disabled.
 2. Split markdown into lines and scan line-by-line.
 3. Skip fenced code blocks.
@@ -38,7 +39,8 @@ This file documents the current implementation workflow so contributors can keep
    - Case A: caption already has label (`captionMarkRegImg`) -> keep caption label as-is.
    - Case B: label without joint (`labelOnlyReg`) -> keep label, normalize image alt.
    - Case C: no label -> prepend generated label prefix (`buildLabelPrefix`).
-8. Join lines back with preserved line breaks.
+8. If no line changed, return original markdown as-is.
+9. Otherwise join lines back with preserved line breaks.
 
 ### Supported single-line image forms
 
@@ -64,9 +66,15 @@ This file documents the current implementation workflow so contributors can keep
 ### Processing steps
 
 1. Normalize options and merge optional frontmatter meta (`readMeta`).
+   - Runtime flags are boolean-only (`imgAltCaption`, `imgTitleCaption`, `autoLangDetection`, `readMeta`, `observe`).
+   - Frontmatter flags are applied only when values are actual booleans.
 2. If caption mode is disabled (`imgAltCaption` and `imgTitleCaption` both false), return.
 3. Resolve runtime label options with `autoLangDetection` cache.
-4. Process target images:
+4. Collect target images by `scope`:
+   - `all`: all images (default).
+   - `standalone`: images without significant siblings + images already inside `figure`.
+   - `figure-only`: only images already inside `figure`.
+5. Process target images:
    - Build caption result using same 3 cases as markdown transformer.
    - Apply image attribute updates.
    - Wrap/update `<figure><figcaption>`.
@@ -86,6 +94,7 @@ This file documents the current implementation workflow so contributors can keep
   - resets auto-language when first image changes.
 - On image tree change (`childList`) and meta change:
   - may trigger full reprocess (`pendingAll`) and language cache reset.
+  - for `scope: 'standalone'`, child-list sibling changes also queue affected sibling `img` nodes for reevaluation.
 
 ## Behavior parity contract
 
@@ -101,6 +110,7 @@ Keep these aligned between `index.js` and DOM helper:
 - This project depends on `p7d-markdown-it-p-captions@^0.21.0`.
 - `script/caption-common.js` is the single place that uses `getMarkRegForLanguages(...)`.
 - Do not import removed legacy `markReg` export.
+- Boolean-like strings are not treated as option flags.
 
 ## Out of scope (for now)
 
@@ -121,6 +131,7 @@ Coverage currently includes:
 - Markdown transformer fixtures (`test/examples*.txt`)
 - DOM helper behavior
   - wrapping/updating/removing captions
+  - scope filtering (`all` / `standalone` / `figure-only`)
   - observer replacement and teardown
   - first-image language re-detection
   - source sync on external attribute edits

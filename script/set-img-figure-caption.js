@@ -14,22 +14,135 @@ let ownAttributeMutationByImage = new WeakMap()
 const NO_OWN_MUTATION = Symbol('no-own-mutation')
 let ownAttributeMutationCleanupTimer = null
 
-const normalizeBoolean = (value) => {
-  if (value === true) return true
-  if (value === false) return false
-  if (typeof value === 'string') {
-    const trimmed = value.trim()
-    if (!trimmed) return null
-    if (trimmed.toLowerCase() === 'true') return true
-    if (trimmed.toLowerCase() === 'false') return false
-    return true
+const normalizeScope = (value) => {
+  if (typeof value !== 'string') return 'all'
+  const normalized = value.trim().toLowerCase()
+  if (normalized === 'all' || normalized === 'standalone' || normalized === 'figure-only') {
+    return normalized
   }
-  return null
+  return 'all'
+}
+
+const normalizeRuntimeOption = (option = {}) => {
+  const opt = {
+    imgAltCaption: true,
+    imgTitleCaption: false,
+    labelLang: 'en',
+    autoLangDetection: true,
+    labelSet: null,
+    figureClass: 'f-img',
+    readMeta: false,
+    observe: false,
+    scope: 'all',
+  }
+  if (!option || typeof option !== 'object') return opt
+
+  if (typeof option.imgAltCaption === 'boolean') {
+    opt.imgAltCaption = option.imgAltCaption
+  }
+  if (typeof option.imgTitleCaption === 'boolean') {
+    opt.imgTitleCaption = option.imgTitleCaption
+  }
+  if (typeof option.autoLangDetection === 'boolean') {
+    opt.autoLangDetection = option.autoLangDetection
+  }
+  if (typeof option.readMeta === 'boolean') {
+    opt.readMeta = option.readMeta
+  }
+  if (typeof option.observe === 'boolean') {
+    opt.observe = option.observe
+  }
+  if (Object.prototype.hasOwnProperty.call(option, 'scope')) {
+    opt.scope = normalizeScope(option.scope)
+  }
+
+  if (typeof option.labelLang === 'string') {
+    const labelLang = option.labelLang.trim()
+    if (labelLang) {
+      opt.labelLang = labelLang
+    }
+  }
+  if (option.labelSet && typeof option.labelSet === 'object') {
+    opt.labelSet = option.labelSet
+  }
+  if (typeof option.figureClass === 'string') {
+    opt.figureClass = option.figureClass
+  }
+
+  if (opt.imgTitleCaption) opt.imgAltCaption = false
+  return opt
 }
 
 const isBlank = (value) => {
   if (!value) return true
   return whitespaceOnlyReg.test(value)
+}
+
+const isElementNode = (node) => node && node.nodeType === 1
+const isImageNode = (node) => isElementNode(node) && node.tagName === 'IMG'
+
+const isWhitespaceTextNode = (node) => (
+  node && node.nodeType === 3 && whitespaceOnlyReg.test(node.textContent || '')
+)
+
+const hasOnlyImageContent = (img) => {
+  if (!img || !img.parentNode || !img.parentNode.childNodes) return false
+  for (const node of img.parentNode.childNodes) {
+    if (!node || node === img) continue
+    if (isWhitespaceTextNode(node)) continue
+    if (node.nodeType === 8) continue
+    return false
+  }
+  return true
+}
+
+const isStandaloneImage = (img) => {
+  if (!isImageNode(img)) return false
+  const parent = img.parentNode
+  if (!isElementNode(parent)) return false
+  if (parent.tagName === 'FIGURE') return true
+  return hasOnlyImageContent(img)
+}
+
+const isScopedImage = (img, scope) => {
+  if (!isImageNode(img)) return false
+  if (scope === 'all') return true
+  if (scope === 'figure-only') {
+    return typeof img.closest === 'function' && Boolean(img.closest('figure'))
+  }
+  return isStandaloneImage(img)
+}
+
+const collectScopedImages = (scope, targets = null) => {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return []
+  if (!targets && scope === 'all') {
+    return Array.from(document.querySelectorAll('img'))
+  }
+  const rawImages = targets
+    ? (Array.isArray(targets) ? targets : Array.from(targets))
+    : Array.from(document.querySelectorAll('img'))
+  const images = []
+  for (const img of rawImages) {
+    if (!isImageNode(img)) continue
+    if (typeof img.isConnected === 'boolean' && !img.isConnected) continue
+    if (scope !== 'all' && !isScopedImage(img, scope)) continue
+    images.push(img)
+  }
+  return images
+}
+
+const findFirstScopedImage = (scope) => {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null
+  if (scope === 'all') {
+    return typeof document.querySelector === 'function' ? document.querySelector('img') : null
+  }
+  const images = document.querySelectorAll('img')
+  for (const img of images) {
+    if (typeof img.isConnected === 'boolean' && !img.isConnected) continue
+    if (!isScopedImage(img, scope)) continue
+    return img
+  }
+  return null
 }
 
 const getAttr = (element, name) => {
@@ -58,7 +171,7 @@ const getAttrWithSource = (element, name) => {
 }
 
 const setAttrIfChanged = (element, name, value) => {
-  if (!element || typeof element.setAttribute !== 'function') return
+  if (!element || typeof element.setAttribute !== 'function') return false
   const current = getAttr(element, name)
   const nextValue = value == null ? '' : String(value)
   if (current === nextValue) return false
@@ -150,30 +263,30 @@ const readMetaFrontmatter = (readMeta) => {
   return parsed && typeof parsed === 'object' ? parsed : null
 }
 
-const applyMetaOptions = (targetOpt, meta, optionOverrides) => {
+const applyMetaOptions = (targetOpt, meta, overrideFlags) => {
   if (!meta || typeof meta !== 'object') return
   const extensionSettings = meta._extensionSettings && typeof meta._extensionSettings === 'object'
     ? meta._extensionSettings
     : null
 
-  const setFlag = (key) => {
-    if (optionOverrides.has(key)) return
-    const directValue = Object.prototype.hasOwnProperty.call(meta, key)
-      ? normalizeBoolean(meta[key])
+  const setFlag = (key, isOverridden) => {
+    if (isOverridden) return
+    const directValue = (Object.prototype.hasOwnProperty.call(meta, key) && typeof meta[key] === 'boolean')
+      ? meta[key]
       : null
     if (directValue !== null) {
       targetOpt[key] = directValue
       return
     }
     if (!extensionSettings || !Object.prototype.hasOwnProperty.call(extensionSettings, key)) return
-    const extValue = normalizeBoolean(extensionSettings[key])
+    const extValue = typeof extensionSettings[key] === 'boolean' ? extensionSettings[key] : null
     if (extValue !== null) {
       targetOpt[key] = extValue
     }
   }
 
-  setFlag('imgAltCaption')
-  setFlag('imgTitleCaption')
+  setFlag('imgAltCaption', overrideFlags.imgAltCaption)
+  setFlag('imgTitleCaption', overrideFlags.imgTitleCaption)
 }
 
 
@@ -292,7 +405,7 @@ const applyImageAttributes = (img, captionResult) => {
     setStoredSourceValue(img, 'title', captionResult.sourceTitle)
   }
   if (setAttrIfChanged(img, 'alt', captionResult.nextAlt)) {
-    markOwnAttributeMutation(img, 'alt', getAttr(img, 'alt'))
+    markOwnAttributeMutation(img, 'alt', captionResult.nextAlt == null ? '' : String(captionResult.nextAlt))
   }
   if (captionResult.clearTitle) {
     if (removeAttr(img, 'title')) {
@@ -332,11 +445,8 @@ const updateFigure = (img, captionText, opt) => {
 }
 
 const processImages = (images, opt) => {
-  if (!images) return []
   const processed = []
   for (const img of images) {
-    if (!img || img.nodeType !== 1 || img.tagName !== 'IMG') continue
-    if (typeof img.isConnected === 'boolean' && !img.isConnected) continue
     const captionResult = buildCaptionResult(img, opt)
     applyImageAttributes(img, captionResult)
     updateFigure(img, captionResult.captionText, opt)
@@ -345,21 +455,26 @@ const processImages = (images, opt) => {
   return processed
 }
 
+const resolveFirstImageForDetection = (scope, detectionState) => {
+  const cachedFirstImage = detectionState.firstImage
+  const cachedConnected = cachedFirstImage && (
+    typeof cachedFirstImage.isConnected !== 'boolean' || cachedFirstImage.isConnected
+  )
+  if (cachedConnected) {
+    return cachedFirstImage
+  }
+  return findFirstScopedImage(scope)
+}
+
 export default async function setImgFigureCaption(option = {}) {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return []
 
-  const opt = {
-    imgAltCaption: true,
-    imgTitleCaption: false,
-    labelLang: 'en',
-    autoLangDetection: true,
-    labelSet: null,
-    figureClass: 'f-img',
-    readMeta: false,
-    observe: false,
+  const optionObject = option && typeof option === 'object' ? option : {}
+  const opt = normalizeRuntimeOption(optionObject)
+  const overrideFlags = {
+    imgAltCaption: typeof optionObject.imgAltCaption === 'boolean',
+    imgTitleCaption: typeof optionObject.imgTitleCaption === 'boolean',
   }
-  Object.assign(opt, option)
-  const optionOverrides = new Set(Object.keys(option || {}))
   const autoLangDetectionState = {
     mode: '',
     checked: false,
@@ -368,22 +483,24 @@ export default async function setImgFigureCaption(option = {}) {
   }
 
   const buildContext = () => {
+    if (!opt.readMeta) return opt
+    const meta = readMetaFrontmatter(true)
+    if (!meta) return opt
     const currentOpt = { ...opt }
-    const meta = readMetaFrontmatter(currentOpt.readMeta)
-    if (meta) {
-      applyMetaOptions(currentOpt, meta, optionOverrides)
-    }
-    return { opt: currentOpt }
+    applyMetaOptions(currentOpt, meta, overrideFlags)
+    if (currentOpt.imgTitleCaption) currentOpt.imgAltCaption = false
+    return currentOpt
   }
 
   const runProcess = (targets = null) => {
-    const { opt: currentOpt } = buildContext()
-    if (currentOpt.imgTitleCaption) currentOpt.imgAltCaption = false
+    const currentOpt = buildContext()
     if (!currentOpt.imgAltCaption && !currentOpt.imgTitleCaption) return []
-    const firstImage = currentOpt.autoLangDetection ? document.querySelector('img') : null
-    const runtimeOpt = resolveRuntimeOptionsWithCache(currentOpt, autoLangDetectionState, firstImage)
-    const images = targets ? Array.from(targets) : Array.from(document.querySelectorAll('img'))
+    const images = collectScopedImages(currentOpt.scope, targets)
     if (images.length === 0) return []
+    const firstImage = currentOpt.autoLangDetection
+      ? resolveFirstImageForDetection(currentOpt.scope, autoLangDetectionState)
+      : null
+    const runtimeOpt = resolveRuntimeOptionsWithCache(currentOpt, autoLangDetectionState, firstImage)
     return processImages(images, runtimeOpt)
   }
 
@@ -414,7 +531,7 @@ export default async function setImgFigureCaption(option = {}) {
     }
   }
 
-  const runProcessLoop = async () => {
+  const runProcessLoop = () => {
     if (running) {
       pending = true
       return
@@ -430,13 +547,29 @@ export default async function setImgFigureCaption(option = {}) {
     running = false
   }
 
-  const isElementNode = (node) => node && node.nodeType === 1
   const isMetaNode = (node) => {
     if (!opt.readMeta || !isElementNode(node)) return false
     return node.tagName === 'META'
       && node.getAttribute('name') === 'markdown-frontmatter'
   }
-  const isImageNode = (node) => isElementNode(node) && node.tagName === 'IMG'
+
+  const queueImageIfScoped = (img) => {
+    if (!isImageNode(img)) return false
+    if (opt.scope !== 'all' && !isScopedImage(img, opt.scope)) return false
+    pendingImages.add(img)
+    return true
+  }
+
+  const collectScopedImagesFromChildListTarget = (target) => {
+    if (opt.scope !== 'standalone') return false
+    if (!isElementNode(target)) return false
+    if (!target.childNodes || target.childNodes.length === 0) return false
+    let found = false
+    for (const child of target.childNodes) {
+      if (queueImageIfScoped(child)) found = true
+    }
+    return found
+  }
 
   const collectImagesFromNodes = (nodes) => {
     let found = false
@@ -445,14 +578,14 @@ export default async function setImgFigureCaption(option = {}) {
       if (!isElementNode(node)) continue
       if (node.tagName === 'FIGCAPTION') continue
       if (isImageNode(node)) {
-        pendingImages.add(node)
-        found = true
+        if (queueImageIfScoped(node)) found = true
         continue
       }
       if (node.querySelectorAll) {
         const images = node.querySelectorAll('img')
-        if (images.length > 0) found = true
-        for (const image of images) pendingImages.add(image)
+        for (const image of images) {
+          if (queueImageIfScoped(image)) found = true
+        }
       }
     }
     return found
@@ -510,6 +643,9 @@ export default async function setImgFigureCaption(option = {}) {
             if (typeof target.isConnected === 'boolean' && !target.isConnected) {
               continue
             }
+            if (!isScopedImage(target, opt.scope)) {
+              continue
+            }
             const expectedOwnValue = consumeOwnAttributeMutation(target, mutation.attributeName)
             const currentValue = target.getAttribute(mutation.attributeName)
             if (expectedOwnValue !== NO_OWN_MUTATION && currentValue === expectedOwnValue) {
@@ -520,7 +656,9 @@ export default async function setImgFigureCaption(option = {}) {
             } else {
               syncSourceAttr(target, 'title')
             }
-            const firstImage = opt.autoLangDetection ? document.querySelector('img') : null
+            const firstImage = opt.autoLangDetection
+              ? resolveFirstImageForDetection(opt.scope, autoLangDetectionState)
+              : null
             if (firstImage && firstImage === target) {
               resetAutoLangDetectionState()
               pendingAll = true
@@ -557,6 +695,10 @@ export default async function setImgFigureCaption(option = {}) {
             metaChanged = true
             shouldSchedule = true
           }
+        }
+        if (collectScopedImagesFromChildListTarget(mutation.target)) {
+          imageTreeChanged = true
+          shouldSchedule = true
         }
       }
       if (metaChanged || (imageTreeChanged && opt.autoLangDetection)) {

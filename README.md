@@ -45,6 +45,8 @@ Paragraph.
 
 ### Options
 
+- `imgAltCaption` (`boolean`, default: `true`)
+  - Use image `alt` as caption source.
 - `imgTitleCaption` (`boolean`, default: `false`)
   - Use image `title` as caption source.
   - When enabled, `imgAltCaption` behavior is disabled.
@@ -58,6 +60,8 @@ Paragraph.
 - `labelSet` (`object|null`, default: `null`)
   - Override generated `label` / `joint` / `space`.
   - Supports single config or per-language map.
+- `imgAltCaption` / `imgTitleCaption` / `autoLangDetection` use boolean values only.
+  - Non-boolean values are ignored.
 
 Single config example:
 
@@ -106,20 +110,27 @@ await setImgFigureCaption({
 ### Behavior
 
 - Mirrors label/caption decisions from markdown transformer.
+- Processes all `img` elements by default (`scope: 'all'`).
 - In `observe` mode, keeps one observer per document.
 - Uses internal source cache for stable reprocessing without extra DOM attributes.
 - Re-detects language when first-image context changes.
 
 ### Options
 
-- `imgAltCaption` (`boolean|string`, default: `true`)
-- `imgTitleCaption` (`boolean|string`, default: `false`)
+- `imgAltCaption` (`boolean`, default: `true`)
+- `imgTitleCaption` (`boolean`, default: `false`)
 - `labelLang` (`string`, default: `en`)
 - `autoLangDetection` (`boolean`, default: `true`)
 - `labelSet` (`object|null`, default: `null`)
 - `figureClass` (`string`, default: `f-img`)
 - `readMeta` (`boolean`, default: `false`)
 - `observe` (`boolean`, default: `false`)
+- `scope` (`'all'|'standalone'|'figure-only'`, default: `'all'`)
+  - `all`: process every `img`.
+  - `standalone`: process only standalone images (no significant siblings) and images already inside `figure`.
+  - `figure-only`: process only images already inside `figure`.
+- `imgAltCaption` / `imgTitleCaption` / `autoLangDetection` / `readMeta` / `observe` use boolean values only.
+  - Non-boolean values (including frontmatter values) are ignored.
 
 ## Limitations
 
