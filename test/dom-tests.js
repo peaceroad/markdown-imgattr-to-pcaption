@@ -368,6 +368,316 @@ export const runDomTests = async ({
     })
   })
 
+  await runDomTest('observe mode keeps childList observation enabled by default', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Caption')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({ imgAltCaption: true, observe: true })
+
+        const observer = ObserverClass.instances[0]
+        assert.ok(observer.observeOptions, 'observe options should exist')
+        assert.strictEqual(observer.observeOptions.childList, true)
+      })
+    })
+  })
+
+  await runDomTest('observe mode respects observeAttributes for image attribute mutations', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'ALT text')
+        img.setAttribute('title', 'Initial title')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({
+          imgTitleCaption: true,
+          autoLangDetection: false,
+          observe: true,
+          observeAttributes: ['title'],
+        })
+
+        const observer = ObserverClass.instances[0]
+        assert.deepStrictEqual(observer.observeOptions.attributeFilter, ['title'])
+
+        img.setAttribute('alt', 'Changed alt')
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'alt',
+          },
+        ])
+
+        let figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. Initial title')
+
+        img.setAttribute('title', 'Changed title')
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'title',
+          },
+        ])
+
+        figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. Changed title')
+      })
+    })
+  })
+
+  await runDomTest('observe mode can disable meta content attribute observation', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const meta = doc.createElement('meta')
+        meta.setAttribute('name', 'markdown-frontmatter')
+        meta.setAttribute('content', JSON.stringify({ imgAltCaption: false }))
+        doc.body.appendChild(meta)
+
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Caption')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({
+          readMeta: true,
+          observe: true,
+          observeMetaContent: false,
+        })
+        assert.strictEqual(doc.body.querySelector('figure'), null)
+
+        const observer = ObserverClass.instances[0]
+        assert.deepStrictEqual(observer.observeOptions.attributeFilter, ['alt', 'title'])
+
+        meta.setAttribute('content', JSON.stringify({ imgAltCaption: true }))
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: meta,
+            attributeName: 'content',
+          },
+        ])
+
+        assert.strictEqual(doc.body.querySelector('figure'), null)
+      })
+    })
+  })
+
+  await runDomTest('readMeta cache reuses parse result until meta content changes', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const meta = doc.createElement('meta')
+        meta.setAttribute('name', 'markdown-frontmatter')
+        meta.setAttribute('content', JSON.stringify({ imgAltCaption: false }))
+        doc.body.appendChild(meta)
+
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Caption')
+        doc.body.appendChild(img)
+
+        const originalParse = JSON.parse
+        let parseCount = 0
+        JSON.parse = (...args) => {
+          parseCount++
+          return originalParse(...args)
+        }
+
+        try {
+          await setImgFigureCaption({ readMeta: true, observe: true })
+          assert.strictEqual(parseCount, 1)
+
+          const observer = ObserverClass.instances[0]
+          img.setAttribute('alt', 'Caption updated')
+          observer.trigger([
+            {
+              type: 'attributes',
+              target: img,
+              attributeName: 'alt',
+            },
+          ])
+          assert.strictEqual(parseCount, 1)
+
+          meta.setAttribute('content', JSON.stringify({ imgAltCaption: true }))
+          observer.trigger([
+            {
+              type: 'attributes',
+              target: meta,
+              attributeName: 'content',
+            },
+          ])
+          assert.strictEqual(parseCount, 2)
+
+          const figure = doc.body.querySelector('figure')
+          assert.ok(figure, 'figure should be created after meta content update')
+        } finally {
+          JSON.parse = originalParse
+        }
+      })
+    })
+  })
+
+  await runDomTest('observe mode can disable childList handling', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const container = doc.createElement('p')
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Caption')
+        const sibling = doc.createElement('span')
+        sibling.textContent = 'x'
+        container.appendChild(img)
+        container.appendChild(sibling)
+        doc.body.appendChild(container)
+
+        await setImgFigureCaption({
+          imgAltCaption: true,
+          scope: 'standalone',
+          observe: true,
+          observeChildList: false,
+        })
+        assert.strictEqual(container.querySelector('figure'), null)
+
+        const observer = ObserverClass.instances[0]
+        assert.strictEqual(observer.observeOptions.childList, undefined)
+
+        container.removeChild(sibling)
+        observer.trigger([
+          {
+            type: 'childList',
+            target: container,
+            addedNodes: [],
+            removedNodes: [sibling],
+          },
+        ])
+
+        assert.strictEqual(container.querySelector('figure'), null)
+      })
+    })
+  })
+
+  await runDomTest('observe mode supports quiet-period debounce', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Initial')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({
+          imgAltCaption: true,
+          observe: true,
+          observeDebounceMs: 40,
+        })
+
+        const observer = ObserverClass.instances[0]
+        img.setAttribute('alt', 'First')
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'alt',
+          },
+        ])
+
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        img.setAttribute('alt', 'Second')
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'alt',
+          },
+        ])
+
+        let figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. Initial')
+
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. Initial')
+
+        await new Promise((resolve) => setTimeout(resolve, 50))
+        figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. Second')
+      })
+    })
+  })
+
+  await runDomTest('observe mode clears pending debounce timer when observe is disabled', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Initial')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({
+          imgAltCaption: true,
+          observe: true,
+          observeDebounceMs: 40,
+        })
+
+        const observer = ObserverClass.instances[0]
+        img.setAttribute('alt', 'Pending')
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'alt',
+          },
+        ])
+
+        await setImgFigureCaption({
+          imgAltCaption: false,
+          imgTitleCaption: false,
+          observe: false,
+        })
+
+        await new Promise((resolve) => setTimeout(resolve, 70))
+        const figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. Initial')
+      })
+    })
+  })
+
+  await runDomTest('observe mode clears pending debounce timer when observer is replaced', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Initial')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({
+          imgAltCaption: true,
+          observe: true,
+          observeDebounceMs: 40,
+        })
+
+        const firstObserver = ObserverClass.instances[0]
+        img.setAttribute('alt', 'Pending')
+        firstObserver.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'alt',
+          },
+        ])
+
+        await setImgFigureCaption({
+          imgAltCaption: false,
+          imgTitleCaption: false,
+          observe: true,
+          observeDebounceMs: 0,
+        })
+
+        assert.strictEqual(firstObserver.disconnected, true)
+        await new Promise((resolve) => setTimeout(resolve, 70))
+
+        const figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. Initial')
+      })
+    })
+  })
+
   await runDomTest('observe mode respects scope for attribute mutations', async () => {
     await withMutationObserver(async (ObserverClass) => {
       await withDocument(async (doc) => {

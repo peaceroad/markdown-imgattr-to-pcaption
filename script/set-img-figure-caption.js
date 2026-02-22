@@ -13,6 +13,7 @@ const sourceValueByImage = new WeakMap()
 let ownAttributeMutationByImage = new WeakMap()
 const NO_OWN_MUTATION = Symbol('no-own-mutation')
 let ownAttributeMutationCleanupTimer = null
+const OBSERVABLE_IMAGE_ATTRIBUTES = ['alt', 'title']
 
 const normalizeScope = (value) => {
   if (typeof value !== 'string') return 'all'
@@ -21,6 +22,29 @@ const normalizeScope = (value) => {
     return normalized
   }
   return 'all'
+}
+
+const normalizeObserveAttributes = (value) => {
+  if (!Array.isArray(value)) return null
+  let hasAlt = false
+  let hasTitle = false
+  for (const item of value) {
+    if (typeof item !== 'string') continue
+    const attrName = item.trim().toLowerCase()
+    if (attrName === 'alt') {
+      hasAlt = true
+      continue
+    }
+    if (attrName === 'title') {
+      hasTitle = true
+    }
+  }
+  const attrs = []
+  for (const attrName of OBSERVABLE_IMAGE_ATTRIBUTES) {
+    if (attrName === 'alt' && hasAlt) attrs.push(attrName)
+    if (attrName === 'title' && hasTitle) attrs.push(attrName)
+  }
+  return attrs
 }
 
 const normalizeRuntimeOption = (option = {}) => {
@@ -34,6 +58,10 @@ const normalizeRuntimeOption = (option = {}) => {
     readMeta: false,
     observe: false,
     scope: 'all',
+    observeAttributes: ['alt', 'title'],
+    observeMetaContent: true,
+    observeChildList: true,
+    observeDebounceMs: 0,
   }
   if (!option || typeof option !== 'object') return opt
 
@@ -52,8 +80,25 @@ const normalizeRuntimeOption = (option = {}) => {
   if (typeof option.observe === 'boolean') {
     opt.observe = option.observe
   }
+  if (typeof option.observeMetaContent === 'boolean') {
+    opt.observeMetaContent = option.observeMetaContent
+  }
+  if (typeof option.observeChildList === 'boolean') {
+    opt.observeChildList = option.observeChildList
+  }
+  if (typeof option.observeDebounceMs === 'number' &&
+      Number.isFinite(option.observeDebounceMs) &&
+      option.observeDebounceMs >= 0) {
+    opt.observeDebounceMs = Math.floor(option.observeDebounceMs)
+  }
   if (Object.prototype.hasOwnProperty.call(option, 'scope')) {
     opt.scope = normalizeScope(option.scope)
+  }
+  if (Object.prototype.hasOwnProperty.call(option, 'observeAttributes')) {
+    const observeAttributes = normalizeObserveAttributes(option.observeAttributes)
+    if (observeAttributes !== null) {
+      opt.observeAttributes = observeAttributes
+    }
   }
 
   if (typeof option.labelLang === 'string') {
@@ -115,8 +160,13 @@ const isScopedImage = (img, scope) => {
 
 const collectScopedImages = (scope, targets = null) => {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return []
-  if (!targets && scope === 'all') {
-    return Array.from(document.querySelectorAll('img'))
+  if (!targets) {
+    if (scope === 'all') {
+      return Array.from(document.querySelectorAll('img'))
+    }
+    if (scope === 'figure-only') {
+      return Array.from(document.querySelectorAll('figure img'))
+    }
   }
   const rawImages = targets
     ? (Array.isArray(targets) ? targets : Array.from(targets))
@@ -135,6 +185,9 @@ const findFirstScopedImage = (scope) => {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null
   if (scope === 'all') {
     return typeof document.querySelector === 'function' ? document.querySelector('img') : null
+  }
+  if (scope === 'figure-only') {
+    return typeof document.querySelector === 'function' ? document.querySelector('figure img') : null
   }
   const images = document.querySelectorAll('img')
   for (const img of images) {
@@ -159,8 +212,10 @@ const getStoredSourceValue = (element, name) => {
 
 const setStoredSourceValue = (element, name, value) => {
   if (!element) return
+  const nextValue = value == null ? '' : String(value)
   const sourceState = sourceValueByImage.get(element) || {}
-  sourceState[name] = value == null ? '' : String(value)
+  if (sourceState[name] === nextValue) return
+  sourceState[name] = nextValue
   sourceValueByImage.set(element, sourceState)
 }
 
@@ -242,13 +297,18 @@ const createCaption = (documentRef, text) => {
   return caption
 }
 
-const readMetaFrontmatter = (readMeta) => {
+const readMetaFrontmatter = (readMeta, cacheState = null) => {
   if (!readMeta) return null
   if (typeof document === 'undefined' || typeof document.querySelector !== 'function') return null
   const metaTag = document.querySelector('meta[name="markdown-frontmatter"]')
   if (!metaTag) return null
   const content = metaTag.getAttribute('content')
   if (!content) return null
+
+  if (cacheState && cacheState.hasValue && cacheState.content === content) {
+    return cacheState.parsed
+  }
+
   const parseJson = (value) => {
     try {
       return JSON.parse(value)
@@ -260,7 +320,13 @@ const readMetaFrontmatter = (readMeta) => {
   if (!parsed && content.includes('&quot;')) {
     parsed = parseJson(content.replace(/&quot;/g, '"'))
   }
-  return parsed && typeof parsed === 'object' ? parsed : null
+  const parsedObject = (parsed && typeof parsed === 'object') ? parsed : null
+  if (cacheState) {
+    cacheState.hasValue = true
+    cacheState.content = content
+    cacheState.parsed = parsedObject
+  }
+  return parsedObject
 }
 
 const applyMetaOptions = (targetOpt, meta, overrideFlags) => {
@@ -445,14 +511,12 @@ const updateFigure = (img, captionText, opt) => {
 }
 
 const processImages = (images, opt) => {
-  const processed = []
   for (const img of images) {
     const captionResult = buildCaptionResult(img, opt)
     applyImageAttributes(img, captionResult)
     updateFigure(img, captionResult.captionText, opt)
-    processed.push(img)
   }
-  return processed
+  return images
 }
 
 const resolveFirstImageForDetection = (scope, detectionState) => {
@@ -481,10 +545,15 @@ export default async function setImgFigureCaption(option = {}) {
     detected: null,
     firstImage: null,
   }
+  const metaFrontmatterCache = {
+    hasValue: false,
+    content: '',
+    parsed: null,
+  }
 
   const buildContext = () => {
     if (!opt.readMeta) return opt
-    const meta = readMetaFrontmatter(true)
+    const meta = readMetaFrontmatter(true, metaFrontmatterCache)
     if (!meta) return opt
     const currentOpt = { ...opt }
     applyMetaOptions(currentOpt, meta, overrideFlags)
@@ -505,6 +574,8 @@ export default async function setImgFigureCaption(option = {}) {
   }
 
   let scheduled = false
+  let scheduleTimeoutId = null
+  let scheduleAnimationFrameId = null
   let running = false
   let pending = false
   let pendingAll = false
@@ -517,17 +588,43 @@ export default async function setImgFigureCaption(option = {}) {
     autoLangDetectionState.firstImage = null
   }
 
+  const clearScheduledProcess = () => {
+    scheduled = false
+    if (scheduleTimeoutId !== null) {
+      clearTimeout(scheduleTimeoutId)
+      scheduleTimeoutId = null
+    }
+    if (scheduleAnimationFrameId !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(scheduleAnimationFrameId)
+      scheduleAnimationFrameId = null
+    }
+  }
+
   const scheduleProcess = () => {
+    const debounceMs = opt.observeDebounceMs
+    if (debounceMs > 0) {
+      if (scheduleTimeoutId !== null) {
+        clearTimeout(scheduleTimeoutId)
+      }
+      scheduleTimeoutId = setTimeout(() => {
+        scheduleTimeoutId = null
+        runProcessLoop()
+      }, debounceMs)
+      return
+    }
+
     if (scheduled) return
     scheduled = true
     const run = () => {
       scheduled = false
+      scheduleAnimationFrameId = null
+      scheduleTimeoutId = null
       runProcessLoop()
     }
     if (typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(run)
+      scheduleAnimationFrameId = requestAnimationFrame(run)
     } else {
-      setTimeout(run, 50)
+      scheduleTimeoutId = setTimeout(run, 50)
     }
   }
 
@@ -571,151 +668,179 @@ export default async function setImgFigureCaption(option = {}) {
     return found
   }
 
-  const collectImagesFromNodes = (nodes) => {
-    let found = false
-    if (!nodes) return false
+  const inspectMutationNodes = (nodes, queueImages, trackAnyImage) => {
+    let queuedScopedImage = false
+    let hasAnyImage = false
+    let hasMeta = false
+    if (!nodes) {
+      return { queuedScopedImage, hasAnyImage, hasMeta }
+    }
     for (const node of nodes) {
       if (!isElementNode(node)) continue
       if (node.tagName === 'FIGCAPTION') continue
+
       if (isImageNode(node)) {
-        if (queueImageIfScoped(node)) found = true
-        continue
-      }
-      if (node.querySelectorAll) {
+        if (trackAnyImage) hasAnyImage = true
+        if (queueImages && queueImageIfScoped(node)) {
+          queuedScopedImage = true
+        }
+      } else if (node.querySelectorAll && queueImages) {
         const images = node.querySelectorAll('img')
         for (const image of images) {
-          if (queueImageIfScoped(image)) found = true
+          if (queueImageIfScoped(image)) {
+            queuedScopedImage = true
+          }
         }
+      } else if (trackAnyImage && node.querySelector && node.querySelector('img')) {
+        hasAnyImage = true
+      }
+
+      if (!hasMeta && opt.readMeta && (
+        isMetaNode(node) ||
+        (node.querySelector && node.querySelector('meta[name="markdown-frontmatter"]'))
+      )) {
+        hasMeta = true
       }
     }
-    return found
+    return { queuedScopedImage, hasAnyImage, hasMeta }
   }
 
-  const hasImageInNodes = (nodes) => {
-    if (!nodes) return false
-    for (const node of nodes) {
-      if (!isElementNode(node)) continue
-      if (node.tagName === 'FIGCAPTION') continue
-      if (isImageNode(node)) return true
-      if (node.querySelector && node.querySelector('img')) return true
-    }
-    return false
+  const observeImageAttributeSet = new Set(opt.observeAttributes)
+  const observeMetaContent = opt.readMeta && opt.observeMetaContent
+  const observeAttributesEnabled = observeImageAttributeSet.size > 0 || observeMetaContent
+  const observeChildListEnabled = opt.observeChildList
+  const attributeFilter = []
+  for (const attrName of opt.observeAttributes) {
+    attributeFilter.push(attrName)
   }
-
-  const hasMetaInNodes = (nodes) => {
-    if (!opt.readMeta || !nodes) return false
-    for (const node of nodes) {
-      if (!isElementNode(node)) continue
-      if (isMetaNode(node)) return true
-      if (node.querySelector && node.querySelector('meta[name="markdown-frontmatter"]')) return true
-    }
-    return false
-  }
-
-  const attributeFilter = ['alt', 'title']
-  if (opt.readMeta) attributeFilter.push('content')
+  if (observeMetaContent) attributeFilter.push('content')
 
   const activeObserverState = activeObserverByDocument.get(document)
+  const disconnectActiveObserver = (state) => {
+    if (!state) return
+    if (typeof state.cancelPending === 'function') {
+      state.cancelPending()
+    }
+    if (state.observer && typeof state.observer.disconnect === 'function') {
+      state.observer.disconnect()
+    }
+  }
   if (!opt.observe || typeof MutationObserver !== 'function') {
-    if (activeObserverState && activeObserverState.observer) {
-      activeObserverState.observer.disconnect()
+    if (activeObserverState) {
+      disconnectActiveObserver(activeObserverState)
       activeObserverByDocument.delete(document)
     }
     return runProcess()
   }
 
   const root = document.documentElement || document.body
-  if (root) {
-    if (activeObserverState && activeObserverState.observer) {
-      activeObserverState.observer.disconnect()
+  if (!root || (!observeAttributesEnabled && !observeChildListEnabled)) {
+    if (activeObserverState) {
+      disconnectActiveObserver(activeObserverState)
+      activeObserverByDocument.delete(document)
     }
+    return runProcess()
+  }
 
-    const observer = new MutationObserver((mutations) => {
-      let shouldSchedule = false
-      let metaChanged = false
-      let imageTreeChanged = false
-      for (const mutation of mutations) {
-        if (!mutation) continue
-        if (mutation.type === 'attributes') {
-          const target = mutation.target
-          if (isImageNode(target) &&
-              (mutation.attributeName === 'alt' || mutation.attributeName === 'title')) {
-            if (typeof target.isConnected === 'boolean' && !target.isConnected) {
-              continue
-            }
-            if (!isScopedImage(target, opt.scope)) {
-              continue
-            }
-            const expectedOwnValue = consumeOwnAttributeMutation(target, mutation.attributeName)
-            const currentValue = target.getAttribute(mutation.attributeName)
-            if (expectedOwnValue !== NO_OWN_MUTATION && currentValue === expectedOwnValue) {
-              continue
-            }
-            if (mutation.attributeName === 'alt') {
-              syncSourceAttr(target, 'alt')
-            } else {
-              syncSourceAttr(target, 'title')
-            }
-            const firstImage = opt.autoLangDetection
-              ? resolveFirstImageForDetection(opt.scope, autoLangDetectionState)
-              : null
-            if (firstImage && firstImage === target) {
-              resetAutoLangDetectionState()
-              pendingAll = true
-              pendingImages.clear()
-            }
-            pendingImages.add(target)
-            shouldSchedule = true
+  if (activeObserverState) {
+    disconnectActiveObserver(activeObserverState)
+  }
+
+  const observer = new MutationObserver((mutations) => {
+    let shouldSchedule = false
+    let metaChanged = false
+    let imageTreeChanged = false
+    for (const mutation of mutations) {
+      if (!mutation) continue
+      if (mutation.type === 'attributes') {
+        if (!observeAttributesEnabled) continue
+        const target = mutation.target
+        const attrName = mutation.attributeName
+        if (!attrName) continue
+        if (isImageNode(target) && observeImageAttributeSet.has(attrName)) {
+          if (typeof target.isConnected === 'boolean' && !target.isConnected) {
             continue
           }
-          if (isMetaNode(target) && mutation.attributeName === 'content') {
-            metaChanged = true
-            shouldSchedule = true
+          if (!isScopedImage(target, opt.scope)) {
             continue
           }
+          const expectedOwnValue = consumeOwnAttributeMutation(target, attrName)
+          const currentValue = target.getAttribute(attrName)
+          if (expectedOwnValue !== NO_OWN_MUTATION && currentValue === expectedOwnValue) {
+            continue
+          }
+          syncSourceAttr(target, attrName)
+          const firstImage = opt.autoLangDetection
+            ? resolveFirstImageForDetection(opt.scope, autoLangDetectionState)
+            : null
+          if (firstImage && firstImage === target) {
+            resetAutoLangDetectionState()
+            pendingAll = true
+            pendingImages.clear()
+          }
+          pendingImages.add(target)
+          shouldSchedule = true
           continue
         }
-        if (mutation.type !== 'childList') continue
-        if (mutation.addedNodes && mutation.addedNodes.length > 0) {
-          if (collectImagesFromNodes(mutation.addedNodes)) {
-            imageTreeChanged = true
-            shouldSchedule = true
-          }
-          if (hasMetaInNodes(mutation.addedNodes)) {
-            metaChanged = true
-            shouldSchedule = true
-          }
+        if (observeMetaContent && isMetaNode(target) && attrName === 'content') {
+          metaChanged = true
+          shouldSchedule = true
+          continue
         }
-        if (mutation.removedNodes && mutation.removedNodes.length > 0) {
-          if (hasImageInNodes(mutation.removedNodes)) {
-            imageTreeChanged = true
-            shouldSchedule = true
-          }
-          if (hasMetaInNodes(mutation.removedNodes)) {
-            metaChanged = true
-            shouldSchedule = true
-          }
-        }
-        if (collectScopedImagesFromChildListTarget(mutation.target)) {
+        continue
+      }
+      if (mutation.type !== 'childList' || !observeChildListEnabled) continue
+      if (mutation.addedNodes && mutation.addedNodes.length > 0) {
+        const addedInfo = inspectMutationNodes(mutation.addedNodes, true, false)
+        if (addedInfo.queuedScopedImage) {
           imageTreeChanged = true
           shouldSchedule = true
         }
+        if (addedInfo.hasMeta) {
+          metaChanged = true
+          shouldSchedule = true
+        }
       }
-      if (metaChanged || (imageTreeChanged && opt.autoLangDetection)) {
-        resetAutoLangDetectionState()
-        pendingAll = true
-        pendingImages.clear()
+      if (mutation.removedNodes && mutation.removedNodes.length > 0) {
+        const removedInfo = inspectMutationNodes(
+          mutation.removedNodes,
+          false,
+          opt.autoLangDetection
+        )
+        if (removedInfo.hasAnyImage) {
+          imageTreeChanged = true
+          shouldSchedule = true
+        }
+        if (removedInfo.hasMeta) {
+          metaChanged = true
+          shouldSchedule = true
+        }
       }
-      if (shouldSchedule) scheduleProcess()
-    })
-    observer.observe(root, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter,
-    })
-    activeObserverByDocument.set(document, { observer })
+      if (collectScopedImagesFromChildListTarget(mutation.target)) {
+        imageTreeChanged = true
+        shouldSchedule = true
+      }
+    }
+    if (metaChanged || (imageTreeChanged && opt.autoLangDetection)) {
+      resetAutoLangDetectionState()
+      pendingAll = true
+      pendingImages.clear()
+    }
+    if (shouldSchedule && (pendingAll || pendingImages.size > 0)) {
+      scheduleProcess()
+    }
+  })
+
+  const observeConfig = { subtree: true }
+  if (observeChildListEnabled) {
+    observeConfig.childList = true
   }
+  if (observeAttributesEnabled) {
+    observeConfig.attributes = true
+    observeConfig.attributeFilter = attributeFilter
+  }
+  observer.observe(root, observeConfig)
+  activeObserverByDocument.set(document, { observer, cancelPending: clearScheduledProcess })
 
   return runProcess()
 }

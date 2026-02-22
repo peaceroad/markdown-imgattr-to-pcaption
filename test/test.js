@@ -84,6 +84,9 @@ class TestElement {
     if (lower === 'img' || lower === 'figcaption' || lower === 'figure') {
       return this.tagName === lower.toUpperCase()
     }
+    if (lower === 'figure img') {
+      return this.tagName === 'IMG' && this.closest('figure') !== null
+    }
     if (lower === 'meta[name="markdown-frontmatter"]') {
       return this.tagName === 'META' && this.getAttribute('name') === 'markdown-frontmatter'
     }
@@ -138,10 +141,15 @@ class TestMutationObserver {
   constructor(callback) {
     this.callback = callback
     this.disconnected = false
+    this.observeTarget = null
+    this.observeOptions = null
     TestMutationObserver.instances.push(this)
   }
 
-  observe() {}
+  observe(target, options) {
+    this.observeTarget = target
+    this.observeOptions = options || null
+  }
 
   disconnect() {
     this.disconnected = true

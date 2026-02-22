@@ -1,6 +1,6 @@
 # markdown-imgattr-to-pcaption
 
-Convert image alt/title text into caption paragraphs that work with
+Convert image `alt` / `title` text into caption paragraphs that work with
 `p7d-markdown-it-p-captions`.
 
 ## Install
@@ -49,7 +49,7 @@ Paragraph.
   - Use image `alt` as caption source.
 - `imgTitleCaption` (`boolean`, default: `false`)
   - Use image `title` as caption source.
-  - When enabled, `imgAltCaption` behavior is disabled.
+  - When enabled, `imgAltCaption` is disabled.
 - `labelLang` (`string`, default: `en`)
   - Default label language (`en`/`ja` out of the box).
 - `autoLangDetection` (`boolean`, default: `true`)
@@ -60,7 +60,7 @@ Paragraph.
 - `labelSet` (`object|null`, default: `null`)
   - Override generated `label` / `joint` / `space`.
   - Supports single config or per-language map.
-- `imgAltCaption` / `imgTitleCaption` / `autoLangDetection` use boolean values only.
+- `imgAltCaption` / `imgTitleCaption` / `autoLangDetection` accept boolean values only.
   - Non-boolean values are ignored.
 
 Single config example:
@@ -86,7 +86,7 @@ setMarkdownImgAttrToPCaption(markdown, {
 ### Conversion rules
 
 - Converts only single-line image syntax surrounded by blank lines.
-- Skips fenced code blocks (``` and ~~~).
+- Skips fenced code blocks (backtick fences and tilde fences).
 - Skips display math fence blocks using `$` markers (`$$ ... $$`, `$$$$ ... $$$$`, etc.).
 - Uses `p7d-markdown-it-p-captions` label patterns for label detection.
 - `autoLangDetection` runs once on the first eligible image.
@@ -114,8 +114,11 @@ await setImgFigureCaption({
 - In `observe` mode, keeps one observer per document.
 - Uses internal source cache for stable reprocessing without extra DOM attributes.
 - Re-detects language when first-image context changes.
+- `observe` supports tuning by attribute/meta/child-list granularity and optional quiet-period debounce.
 
 ### Options
+
+Caption and label:
 
 - `imgAltCaption` (`boolean`, default: `true`)
 - `imgTitleCaption` (`boolean`, default: `false`)
@@ -123,13 +126,32 @@ await setImgFigureCaption({
 - `autoLangDetection` (`boolean`, default: `true`)
 - `labelSet` (`object|null`, default: `null`)
 - `figureClass` (`string`, default: `f-img`)
+
+Meta + observe:
+
 - `readMeta` (`boolean`, default: `false`)
 - `observe` (`boolean`, default: `false`)
+- `observeAttributes` (`string[]`, default: `['alt', 'title']`)
+  - Select image attributes to watch in observe mode.
+  - Supported values: `alt`, `title`.
+- `observeMetaContent` (`boolean`, default: `true`)
+  - When `readMeta: true`, watch `meta[name="markdown-frontmatter"]` `content` changes.
+- `observeChildList` (`boolean`, default: `true`)
+  - Watch DOM tree changes (`childList`) in observe mode.
+- `observeDebounceMs` (`number`, default: `0`)
+  - Quiet-period debounce for observe reprocessing (`0` keeps immediate scheduling behavior).
+
+Scope:
+
 - `scope` (`'all'|'standalone'|'figure-only'`, default: `'all'`)
   - `all`: process every `img`.
   - `standalone`: process only standalone images (no significant siblings) and images already inside `figure`.
   - `figure-only`: process only images already inside `figure`.
-- `imgAltCaption` / `imgTitleCaption` / `autoLangDetection` / `readMeta` / `observe` use boolean values only.
+
+Boolean-only option rule:
+
+- `imgAltCaption`, `imgTitleCaption`, `autoLangDetection`, `readMeta`, `observe`,
+  `observeMetaContent`, and `observeChildList` accept boolean values only.
   - Non-boolean values (including frontmatter values) are ignored.
 
 ## Limitations

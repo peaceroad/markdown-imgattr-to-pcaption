@@ -192,13 +192,21 @@ const normalizeRuntimeOption = (option) => {
 const setMarkdownImgAttrToPCaption = (markdown, option) => {
   const opt = normalizeRuntimeOption(option)
   if (!opt.imgAltCaption && !opt.imgTitleCaption) return markdown
+  if (markdown.indexOf('![') === -1 || markdown.indexOf('](') === -1) return markdown
 
   const lines = markdown.split(/\r\n|\n/)
+  const blankLines = []
+  for (let n = 0; n < lines.length; n++) {
+    blankLines[n] = blankLineReg.test(lines[n])
+  }
   let activeFenceChar = ''
   let activeFenceLength = 0
   let activeDollarFenceLength = 0
   let br = '\n'
-  let brResolved = false
+  const firstLfIndex = markdown.indexOf('\n')
+  if (firstLfIndex > 0 && markdown[firstLfIndex - 1] === '\r') {
+    br = '\r\n'
+  }
 
   let labelMeta = null
   let autoLangChecked = !opt.autoLangDetection
@@ -232,8 +240,8 @@ const setMarkdownImgAttrToPCaption = (markdown, option) => {
       continue
     }
 
-    const isPrevBreakLine = (n === 0) ? true : blankLineReg.test(lines[n - 1])
-    const isNextBreakLine = (n === lines.length - 1) ? true : blankLineReg.test(lines[n + 1])
+    const isPrevBreakLine = (n === 0) ? true : blankLines[n - 1]
+    const isNextBreakLine = (n === lines.length - 1) ? true : blankLines[n + 1]
     if (!isPrevBreakLine || !isNextBreakLine) continue
     if (line.indexOf('![') === -1 || line.indexOf('](') === -1) continue
 
@@ -253,11 +261,6 @@ const setMarkdownImgAttrToPCaption = (markdown, option) => {
     if (!labelMeta) {
       labelMeta = resolveLabelConfig(opt)
     }
-    if (!brResolved) {
-      const firstBreak = markdown.match(/\r\n|\n/)
-      br = firstBreak ? firstBreak[0] : '\n'
-      brResolved = true
-    }
     const nextLine = modLine(imgLine, br, opt, labelMeta)
     if (nextLine !== line) {
       lines[n] = nextLine
@@ -267,11 +270,14 @@ const setMarkdownImgAttrToPCaption = (markdown, option) => {
   if (!changed) return markdown
 
   const lineBreaks = markdown.match(/\r\n|\n/g) || []
-  const output = []
+  const output = new Array(lines.length * 2 - 1)
+  let outIndex = 0
   for (let n = 0; n < lines.length; n++) {
-    output.push(lines[n])
+    output[outIndex] = lines[n]
+    outIndex++
     if (n < lines.length - 1) {
-      output.push(lineBreaks[n] || br)
+      output[outIndex] = lineBreaks[n] || br
+      outIndex++
     }
   }
   return output.join('')

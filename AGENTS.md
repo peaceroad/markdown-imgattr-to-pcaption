@@ -66,7 +66,10 @@ This file documents the current implementation workflow so contributors can keep
 ### Processing steps
 
 1. Normalize options and merge optional frontmatter meta (`readMeta`).
-   - Runtime flags are boolean-only (`imgAltCaption`, `imgTitleCaption`, `autoLangDetection`, `readMeta`, `observe`).
+   - Runtime flags are boolean-only (`imgAltCaption`, `imgTitleCaption`, `autoLangDetection`, `readMeta`, `observe`, `observeMetaContent`, `observeChildList`).
+   - `observeAttributes` supports `alt` / `title` (array).
+   - `observeDebounceMs` (`number`) controls quiet-period debounce for observer reprocess.
+   - Treat normalized runtime options as seed options; on each reprocess, merge fresh meta values onto the seed (do not reuse already-merged options as new seeds).
    - Frontmatter flags are applied only when values are actual booleans.
 2. If caption mode is disabled (`imgAltCaption` and `imgTitleCaption` both false), return.
 3. Resolve runtime label options with `autoLangDetection` cache.
@@ -88,6 +91,11 @@ This file documents the current implementation workflow so contributors can keep
   - calling with `observe: false` disconnects existing observer.
 - Uses internal source cache (`sourceValueByImage`: `WeakMap`) so re-runs are stable without adding DOM attributes.
 - Uses own-mutation guard (`ownAttributeMutationByImage`) to avoid reacting to helper-triggered `alt`/`title` updates.
+- Supports observer granularity options:
+  - `observeAttributes` (image attribute watch set)
+  - `observeMetaContent` (frontmatter meta `content` watch toggle)
+  - `observeChildList` (tree change watch toggle)
+  - `observeDebounceMs` (quiet-period debounce)
 - On external `alt`/`title` mutation:
   - syncs source cache,
   - schedules reprocess,
@@ -142,3 +150,10 @@ Coverage currently includes:
 - Prefer boolean `.test()` when full regex match data is not needed.
 - Keep auto-language detection cached and reset only when needed.
 - Avoid global rescans during observe updates unless required (`pendingAll`).
+- In `index.js`, short-circuit early when markdown has no inline image markers (`![` + `](`).
+- Cache per-line blank checks in `index.js` to avoid repeated regex calls on neighbors.
+- In `index.js`, preallocate output buffer when rebuilding markdown with preserved line endings.
+- In DOM helper, skip source-cache writes when stored values are unchanged.
+- In DOM helper, for `scope: 'figure-only'`, prefer `figure img` selector over scanning all images.
+- In observe mode, inspect mutation node sets once per added/removed batch and schedule only when pending targets actually exist.
+- In `readMeta` path, parse frontmatter JSON only when meta `content` actually changes (reuse parsed result for identical content).
