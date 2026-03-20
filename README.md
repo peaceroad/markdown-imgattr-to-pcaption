@@ -19,6 +19,9 @@ import setMarkdownImgAttrToPCaption from '@peaceroad/markdown-imgattr-to-pcaptio
 const out = setMarkdownImgAttrToPCaption(markdown)
 ```
 
+- `markdown` must be a string.
+  - Non-string input throws `TypeError`.
+
 ### Example
 
 Input:
@@ -55,8 +58,9 @@ Paragraph.
 - `autoLangDetection` (`boolean`, default: `true`)
   - Detect language from the first eligible image caption.
   - `ja` if Japanese characters exist.
-  - `en` if ASCII letters exist.
-  - Otherwise keeps the current `labelLang`.
+  - `en` if ASCII letters exist and `labelLang` is still the default `en`/`ja` family.
+  - Preserves explicit non-`en`/`ja` `labelLang` on ASCII-only text.
+  - Otherwise falls back to the current upstream label-default priority.
 - `labelSet` (`object|null`, default: `null`)
   - Override generated `label` / `joint` / `space`.
   - Supports single config or per-language map.

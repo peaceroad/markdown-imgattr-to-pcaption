@@ -83,6 +83,25 @@ export const runDomTests = async ({
     })
   })
 
+  await runDomTest('trims caption text while preserving retained alt whitespace in title mode', async () => {
+    await withDocument(async (doc) => {
+      const img = doc.createElement('img')
+      img.setAttribute('alt', '  ALT text  ')
+      img.setAttribute('title', '  Title text  ')
+      doc.body.appendChild(img)
+
+      await setImgFigureCaption({ imgTitleCaption: true, autoLangDetection: false, labelLang: 'en' })
+
+      const figure = doc.body.querySelector('figure')
+      assert.ok(figure, 'figure should be created')
+      const figcaption = figure.querySelector('figcaption')
+      assert.ok(figcaption, 'figcaption should be created')
+      assert.strictEqual(figcaption.textContent, 'Figure. Title text')
+      assert.strictEqual(img.getAttribute('alt'), '  ALT text  ')
+      assert.strictEqual(img.getAttribute('title'), null)
+    })
+  })
+
   await runDomTest('ignores non-boolean imgTitleCaption option', async () => {
     await withDocument(async (doc) => {
       const img = doc.createElement('img')
@@ -340,6 +359,26 @@ export const runDomTests = async ({
       const figcaption = img.closest('figure').querySelector('figcaption')
       assert.strictEqual(figcaption.textContent, '図')
       assert.strictEqual(img.getAttribute('alt'), '猫')
+    })
+  })
+
+  await runDomTest('auto language detection keeps explicit non-en labelLang for ASCII text', async () => {
+    await withDocument(async (doc) => {
+      const img = doc.createElement('img')
+      img.setAttribute('alt', 'Bonjour')
+      doc.body.appendChild(img)
+
+      await setImgFigureCaption({
+        imgAltCaption: true,
+        autoLangDetection: true,
+        labelLang: 'fr',
+        labelSet: {
+          fr: { label: 'Fig', joint: '.', space: ' ' },
+        },
+      })
+
+      const figcaption = img.closest('figure').querySelector('figcaption')
+      assert.strictEqual(figcaption.textContent, 'Fig. Bonjour')
     })
   })
 

@@ -1,13 +1,13 @@
 import {
+  analyzeCaptionText,
   buildLabelPrefix,
-  captionMarkRegImg,
   detectAutoLang,
-  jointSuffixReg,
-  labelOnlyReg,
+  normalizeCaptionText,
+  normalizeCaptionRuntimeOption,
   resolveLabelConfig,
 } from './script/caption-common.js'
 
-const imageLineReg = /^([ \t]*?)!\[ *?(.*?) *?\]\((.+)\)( *(?:{.*?})?)$/
+const imageLineReg = /^([ \t]*?)!\[(.*?)\]\((.+)\)( *(?:{.*?})?)$/
 const blankLineReg = /^[ \t]*$/
 const imageTitleReg = /^(.*?)[ \t]+("((?:\\"|[^"])*)"|'((?:\\'|[^'])*)')[ \t]*$/
 const imageParenTitleReg = /^(.*?)[ \t]+\(((?:\\\(|\\\)|[^()])*)\)[ \t]*$/
@@ -149,48 +149,18 @@ const getCaptionText = (imgLine, opt) => {
 }
 
 const getCaptionTextForDetection = (imgLine, opt) => {
-  const captionText = getCaptionText(imgLine, opt)
+  const captionText = normalizeCaptionText(getCaptionText(imgLine, opt))
   if (captionText) {
     return captionText
   }
-  return imgLine.alt || ''
-}
-
-const normalizeRuntimeOption = (option) => {
-  const opt = {
-    imgAltCaption: true,
-    imgTitleCaption: false,
-    labelLang: 'en',
-    autoLangDetection: true,
-    labelSet: null, // { label: '図', joint: '：', space: '　' } or { ja: { label: '図', joint: '　', space: '' }, en: { label: 'Figure', joint: '.', space: ' ' } }
-  }
-  if (!option || typeof option !== 'object') return opt
-
-  if (typeof option.imgAltCaption === 'boolean') {
-    opt.imgAltCaption = option.imgAltCaption
-  }
-  if (typeof option.imgTitleCaption === 'boolean') {
-    opt.imgTitleCaption = option.imgTitleCaption
-  }
-
-  if (typeof option.labelLang === 'string') {
-    const labelLang = option.labelLang.trim()
-    if (labelLang) {
-      opt.labelLang = labelLang
-    }
-  }
-  if (option.labelSet && typeof option.labelSet === 'object') {
-    opt.labelSet = option.labelSet
-  }
-  if (typeof option.autoLangDetection === 'boolean') {
-    opt.autoLangDetection = option.autoLangDetection
-  }
-  if (opt.imgTitleCaption) opt.imgAltCaption = false
-  return opt
+  return normalizeCaptionText(imgLine.alt || '')
 }
 
 const setMarkdownImgAttrToPCaption = (markdown, option) => {
-  const opt = normalizeRuntimeOption(option)
+  if (typeof markdown !== 'string') {
+    throw new TypeError('setMarkdownImgAttrToPCaption: markdown must be a string')
+  }
+  const opt = normalizeCaptionRuntimeOption(option)
   if (!opt.imgAltCaption && !opt.imgTitleCaption) return markdown
   if (markdown.indexOf('![') === -1 || markdown.indexOf('](') === -1) return markdown
 
@@ -249,9 +219,9 @@ const setMarkdownImgAttrToPCaption = (markdown, option) => {
     if (!imgLine) continue
 
     if (!autoLangChecked) {
-      const rawText = getCaptionTextForDetection(imgLine, opt).trim()
+      const rawText = getCaptionTextForDetection(imgLine, opt)
       if (rawText) {
-        const detected = detectAutoLang(rawText)
+        const detected = detectAutoLang(rawText, opt.labelLang)
         if (detected) {
           opt.labelLang = detected
         }
@@ -284,29 +254,18 @@ const setMarkdownImgAttrToPCaption = (markdown, option) => {
 }
   
 const modLine = (imgLine, br, opt, labelMeta) => {
-  const captionText = getCaptionText(imgLine, opt)
-  const hasLabel = Boolean(captionText && captionMarkRegImg && captionMarkRegImg.test(captionText))
-  const hasLabelWithNoJoint = (!hasLabel && captionText && labelOnlyReg)
-    ? captionText.match(labelOnlyReg)
-    : null
+  const { captionText, hasLabel } = analyzeCaptionText(getCaptionText(imgLine, opt))
 
   let output = imgLine.indent
   if (hasLabel) {
     if (opt.imgAltCaption) {
-      output += imgLine.alt
+      output += captionText
     } else if (opt.imgTitleCaption) {
-      output += imgLine.title
+      output += captionText
     }
     output += br + br + imgLine.indent + '!['
     if (opt.imgTitleCaption) output += imgLine.alt
     output += ']'
-  } else if (hasLabelWithNoJoint) {
-    if (opt.imgAltCaption) {
-      output += imgLine.alt
-    } else if (opt.imgTitleCaption) {
-      output += imgLine.title
-    }
-    output += br + br + imgLine.indent + '![' + hasLabelWithNoJoint[0].replace(jointSuffixReg, '') + ']'
   } else {
     const hasCaption = captionText !== ''
     const labelPrefix = buildLabelPrefix(labelMeta, hasCaption)

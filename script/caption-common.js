@@ -1,7 +1,9 @@
-import { markAfterNum, getMarkRegForLanguages, joint } from 'p7d-markdown-it-p-captions'
-import langSets from 'p7d-markdown-it-p-captions/lang.js'
+import {
+  analyzeCaptionStart,
+  getGeneratedLabelDefaults,
+  getMarkRegStateForLanguages,
+} from 'p7d-markdown-it-p-captions'
 
-const asciiOnlyReg = /^[\x00-\x7F]*$/
 export const whitespaceOnlyReg = /^[\s\u3000]+$/
 const unicodeLetterReg = (() => {
   try {
@@ -11,37 +13,85 @@ const unicodeLetterReg = (() => {
   }
 })()
 
-const DEFAULT_LABEL_CONFIG_MAP = {
-  en: { label: 'Figure', joint: '.', space: ' ' },
-  ja: { label: '図', joint: '　', space: '' },
+const FALLBACK_LABEL_CONFIG = Object.freeze({
+  label: 'Figure',
+  joint: '.',
+  space: ' ',
+})
+const DEFAULT_MARK_REG_STATE = getMarkRegStateForLanguages()
+const ENGLISH_MARK_REG_STATE = getMarkRegStateForLanguages(['en'])
+const DEFAULT_GENERATED_LABEL_DEFAULTS_BY_LANG = DEFAULT_MARK_REG_STATE.generatedLabelDefaultsByLang || Object.create(null)
+const ENGLISH_GENERATED_LABEL_DEFAULTS = getGeneratedLabelDefaults('img', '', ENGLISH_MARK_REG_STATE)
+const defaultLabelConfigCache = new Map()
+
+export const CAPTION_RUNTIME_OPTION_DEFAULTS = Object.freeze({
+  imgAltCaption: true,
+  imgTitleCaption: false,
+  labelLang: 'en',
+  autoLangDetection: true,
+  labelSet: null,
+})
+
+export const normalizeCaptionText = (value) => {
+  if (typeof value !== 'string') return ''
+  return value.trim()
 }
-const LANG_KEYS = Object.keys(langSets)
-const lowercaseAsciiLetterReg = /([a-z])/g
 
-const buildLabelOnlyReg = () => {
-  if (LANG_KEYS.length === 0) return null
-
-  const patterns = []
-  for (const lang of LANG_KEYS) {
-    const data = langSets[lang]
-    if (!data || !data.markReg || !data.markReg.img) continue
-    let pattern = data.markReg.img
-    if (data.type && data.type['inter-word-space']) {
-      pattern = pattern.replace(lowercaseAsciiLetterReg, (match) => '[' + match + match.toUpperCase() + ']')
+export const analyzeCaptionText = (value) => {
+  const captionText = normalizeCaptionText(value)
+  if (!captionText) {
+    return {
+      captionText: '',
+      hasLabel: false,
     }
-    patterns.push(pattern)
+  }
+  const captionAnalysis = analyzeCaptionStart(captionText, {
+    markRegState: DEFAULT_MARK_REG_STATE,
+    preferredMark: 'img',
+  })
+
+  return {
+    captionText,
+    hasLabel: !!captionAnalysis,
+  }
+}
+
+export const normalizeCaptionRuntimeOption = (option, defaults = CAPTION_RUNTIME_OPTION_DEFAULTS) => {
+  const opt = {
+    imgAltCaption: true,
+    imgTitleCaption: false,
+    labelLang: 'en',
+    autoLangDetection: true,
+    labelSet: null,
+    ...defaults,
+  }
+  if (!option || typeof option !== 'object') {
+    if (opt.imgTitleCaption) opt.imgAltCaption = false
+    return opt
   }
 
-  if (patterns.length === 0) return null
-  return new RegExp('^(' + patterns.join('|') + ')([ .]?' + markAfterNum + ')?$')
+  if (typeof option.imgAltCaption === 'boolean') {
+    opt.imgAltCaption = option.imgAltCaption
+  }
+  if (typeof option.imgTitleCaption === 'boolean') {
+    opt.imgTitleCaption = option.imgTitleCaption
+  }
+  if (typeof option.labelLang === 'string') {
+    const labelLang = option.labelLang.trim()
+    if (labelLang) {
+      opt.labelLang = labelLang
+    }
+  }
+  if (option.labelSet && typeof option.labelSet === 'object') {
+    opt.labelSet = option.labelSet
+  }
+  if (typeof option.autoLangDetection === 'boolean') {
+    opt.autoLangDetection = option.autoLangDetection
+  }
+  if (opt.imgTitleCaption) opt.imgAltCaption = false
+  return opt
 }
 
-export const labelOnlyReg = buildLabelOnlyReg()
-export const jointSuffixReg = new RegExp(joint + '$')
-const captionMarkReg = getMarkRegForLanguages(LANG_KEYS)
-export const captionMarkRegImg = captionMarkReg ? captionMarkReg.img : null
-
-const isAsciiOnly = (value) => asciiOnlyReg.test(value)
 const isAsciiLetterCode = (code) => (
   (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)
 )
@@ -55,7 +105,7 @@ const isJapaneseCodePoint = (code) => {
   )
 }
 
-export const detectAutoLang = (value) => {
+const detectSimpleAutoLang = (value, currentLabelLang = '') => {
   let hasAsciiLetter = false
   for (const ch of value) {
     const code = ch.codePointAt(0)
@@ -73,15 +123,35 @@ export const detectAutoLang = (value) => {
       return null
     }
   }
-  return hasAsciiLetter ? 'en' : null
+  if (!hasAsciiLetter) return null
+  if (
+    typeof currentLabelLang === 'string' &&
+    currentLabelLang &&
+    currentLabelLang !== 'en' &&
+    currentLabelLang !== 'ja'
+  ) {
+    return currentLabelLang
+  }
+  return 'en'
 }
 
-const getInterWordSpace = (labelLang, labelText) => {
-  const lang = langSets[labelLang]
-  if (lang && lang.type) {
-    return Boolean(lang.type['inter-word-space'])
+export const detectAutoLang = (value, currentLabelLang = '') => {
+  const detected = detectSimpleAutoLang(value, currentLabelLang)
+  if (detected) return detected
+  const preferredLanguages = (typeof currentLabelLang === 'string' && currentLabelLang)
+    ? [currentLabelLang]
+    : null
+  const defaults = getGeneratedLabelDefaults('img', value, DEFAULT_MARK_REG_STATE, preferredLanguages)
+  if (!defaults) return null
+  const langs = DEFAULT_MARK_REG_STATE.languages
+  for (let i = 0; i < langs.length; i++) {
+    const lang = langs[i]
+    const generatedDefaults = DEFAULT_GENERATED_LABEL_DEFAULTS_BY_LANG[lang]
+    if (generatedDefaults && generatedDefaults.img === defaults) {
+      return lang
+    }
   }
-  return isAsciiOnly(labelText)
+  return null
 }
 
 const normalizeLabelConfig = (value) => {
@@ -120,9 +190,32 @@ const applyLabelConfig = (base, override) => {
   }
 }
 
+const cloneLabelConfig = (value) => ({
+  label: value.label,
+  joint: value.joint,
+  space: value.space,
+})
+
+const getCachedGeneratedLabelDefaults = (labelLang) => {
+  if (typeof labelLang !== 'string' || !labelLang) return null
+  const cached = defaultLabelConfigCache.get(labelLang)
+  if (cached !== undefined) {
+    return cached
+  }
+  const defaults = getGeneratedLabelDefaults(
+    'img',
+    '',
+    getMarkRegStateForLanguages([labelLang]),
+  )
+  defaultLabelConfigCache.set(labelLang, defaults || null)
+  return defaults || null
+}
+
 const getDefaultLabelConfig = (labelLang) => {
-  const base = DEFAULT_LABEL_CONFIG_MAP[labelLang] || DEFAULT_LABEL_CONFIG_MAP.en
-  return { label: base.label, joint: base.joint, space: base.space }
+  const langDefaults = getCachedGeneratedLabelDefaults(labelLang)
+  if (langDefaults) return cloneLabelConfig(langDefaults)
+  if (ENGLISH_GENERATED_LABEL_DEFAULTS) return cloneLabelConfig(ENGLISH_GENERATED_LABEL_DEFAULTS)
+  return cloneLabelConfig(FALLBACK_LABEL_CONFIG)
 }
 
 export const resolveLabelConfig = (opt) => {
@@ -139,17 +232,7 @@ export const resolveLabelConfig = (opt) => {
   applyLabelConfig(config, singleConfig)
 
   if (!config.label) {
-    config.label = DEFAULT_LABEL_CONFIG_MAP.en.label
-  }
-
-  if (config.joint === undefined || config.space === undefined) {
-    const interWordSpace = getInterWordSpace(opt.labelLang, config.label)
-    if (config.joint === undefined) {
-      config.joint = interWordSpace ? '.' : '　'
-    }
-    if (config.space === undefined) {
-      config.space = interWordSpace ? ' ' : '　'
-    }
+    config.label = FALLBACK_LABEL_CONFIG.label
   }
   return config
 }

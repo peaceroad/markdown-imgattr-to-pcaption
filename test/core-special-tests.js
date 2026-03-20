@@ -30,4 +30,38 @@ export const runCoreSpecialTests = ({ runCoreTest, assert, setMarkdownImgAttrToP
     })
     assert.strictEqual(out, expected)
   })
+
+  runCoreTest('throws clear error when markdown is not a string', () => {
+    assert.throws(
+      () => setMarkdownImgAttrToPCaption(null),
+      /markdown must be a string/,
+    )
+  })
+
+  runCoreTest('trims caption text while preserving retained alt in title mode', () => {
+    const src = 'Paragraph.\n\n![  ALT text  ](image.jpg "  Title text  ")\n\nParagraph.'
+    const expected = 'Paragraph.\n\nFigure. Title text\n\n![  ALT text  ](image.jpg)\n\nParagraph.'
+    const out = setMarkdownImgAttrToPCaption(src, { imgTitleCaption: true })
+    assert.strictEqual(out, expected)
+  })
+
+  runCoreTest('trims caption text before existing label detection', () => {
+    const src = 'Paragraph.\n\n![ Figure 1 ](image.jpg)\n\nParagraph.'
+    const expected = 'Paragraph.\n\nFigure 1\n\n![](image.jpg)\n\nParagraph.'
+    const out = setMarkdownImgAttrToPCaption(src)
+    assert.strictEqual(out, expected)
+  })
+
+  runCoreTest('keeps explicit non-en labelLang for ASCII auto detection', () => {
+    const src = 'Paragraph.\n\n![Bonjour](image.jpg)\n\nParagraph.'
+    const expected = 'Paragraph.\n\nFig. Bonjour\n\n![](image.jpg)\n\nParagraph.'
+    const out = setMarkdownImgAttrToPCaption(src, {
+      labelLang: 'fr',
+      autoLangDetection: true,
+      labelSet: {
+        fr: { label: 'Fig', joint: '.', space: ' ' },
+      },
+    })
+    assert.strictEqual(out, expected)
+  })
 }

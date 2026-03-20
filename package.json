@@ -4,6 +4,10 @@
   "description": "Change img alt attribute to figure caption paragraph for p7d-markdown-it-p-captions.",
   "main": "index.js",
   "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./script/set-img-figure-caption.js": "./script/set-img-figure-caption.js"
+  },
   "files": [
     "index.js",
     "README.md",
@@ -24,6 +28,6 @@
   },
   "homepage": "https://github.com/peaceroad/markdown-imgattr-to-pcaption#readme",
   "dependencies": {
-    "p7d-markdown-it-p-captions": "^0.21.0"
+    "p7d-markdown-it-p-captions": "^0.22.0"
   }
 }

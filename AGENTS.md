@@ -36,9 +36,8 @@ This file documents the current implementation workflow so contributors can keep
 5. On the first eligible image only, optionally run `autoLangDetection`.
 6. Build label metadata once (`labelLang` + optional `labelSet`).
 7. Transform each eligible image via `modLine`:
-   - Case A: caption already has label (`captionMarkRegImg`) -> keep caption label as-is.
-   - Case B: label without joint (`labelOnlyReg`) -> keep label, normalize image alt.
-   - Case C: no label -> prepend generated label prefix (`buildLabelPrefix`).
+   - Case A: caption already has label (`analyzeCaptionText`) -> keep caption label as-is.
+   - Case B: no label -> prepend generated label prefix (`buildLabelPrefix`).
 8. If no line changed, return original markdown as-is.
 9. Otherwise join lines back with preserved line breaks.
 
@@ -50,11 +49,13 @@ This file documents the current implementation workflow so contributors can keep
 
 ### Detection and label rules
 
-- Label detection regex source: `p7d-markdown-it-p-captions` via `getMarkRegForLanguages`.
+- Label detection source: `p7d-markdown-it-p-captions` via `analyzeCaptionStart`.
+- Generated-label defaults source: `p7d-markdown-it-p-captions` via `getGeneratedLabelDefaults`.
 - `autoLangDetection`:
   - `ja` if Japanese code points are found.
-  - `en` if ASCII letters are found and no conflicting non-ASCII letters.
-  - otherwise fallback to existing `labelLang`.
+  - `en` if ASCII letters are found and current `labelLang` is still the default `en/ja` family.
+  - preserve explicit non-`en`/`ja` `labelLang` on ASCII-only text so custom language label sets are not overwritten.
+  - otherwise fallback to `p-captions` generated-label tie-break order, seeded by existing `labelLang`.
 
 ## Core workflow: `script/set-img-figure-caption.js`
 
@@ -111,12 +112,13 @@ Keep these aligned between `index.js` and DOM helper:
 - Shared label/lang utilities from `script/caption-common.js`
 - No-label prefix generation (`labelLang`, `autoLangDetection`, `labelSet`)
 - `imgTitleCaption` precedence over `imgAltCaption`
-- Label-without-joint handling
+- Any detected image label is treated as an existing caption label
 
 ## Compatibility notes
 
-- This project depends on `p7d-markdown-it-p-captions@^0.21.0`.
-- `script/caption-common.js` is the single place that uses `getMarkRegForLanguages(...)`.
+- This project depends on `p7d-markdown-it-p-captions@^0.22.0`.
+- `script/caption-common.js` is the single place that talks to upstream helper APIs (`analyzeCaptionStart`, `getGeneratedLabelDefaults`, `getMarkRegStateForLanguages`).
+- `script/caption-common.js` caches per-language generated label defaults locally and clones before applying `labelSet` overrides.
 - Do not import removed legacy `markReg` export.
 - Boolean-like strings are not treated as option flags.
 
@@ -153,7 +155,9 @@ Coverage currently includes:
 - In `index.js`, short-circuit early when markdown has no inline image markers (`![` + `](`).
 - Cache per-line blank checks in `index.js` to avoid repeated regex calls on neighbors.
 - In `index.js`, preallocate output buffer when rebuilding markdown with preserved line endings.
+- In shared helpers, reuse cached generated-label defaults instead of recomputing per `labelLang`.
 - In DOM helper, skip source-cache writes when stored values are unchanged.
+- In DOM helper hot paths, avoid duplicate `alt` / `title` source lookups for the same image.
 - In DOM helper, for `scope: 'figure-only'`, prefer `figure img` selector over scanning all images.
 - In observe mode, inspect mutation node sets once per added/removed batch and schedule only when pending targets actually exist.
 - In `readMeta` path, parse frontmatter JSON only when meta `content` actually changes (reuse parsed result for identical content).

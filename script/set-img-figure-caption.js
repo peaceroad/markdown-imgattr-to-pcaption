@@ -1,9 +1,9 @@
 import {
+  analyzeCaptionText,
   buildLabelPrefix,
-  captionMarkRegImg,
   detectAutoLang,
-  jointSuffixReg,
-  labelOnlyReg,
+  normalizeCaptionRuntimeOption,
+  normalizeCaptionText,
   resolveLabelConfig,
   whitespaceOnlyReg,
 } from './caption-common.js'
@@ -48,12 +48,7 @@ const normalizeObserveAttributes = (value) => {
 }
 
 const normalizeRuntimeOption = (option = {}) => {
-  const opt = {
-    imgAltCaption: true,
-    imgTitleCaption: false,
-    labelLang: 'en',
-    autoLangDetection: true,
-    labelSet: null,
+  const opt = normalizeCaptionRuntimeOption(option, {
     figureClass: 'f-img',
     readMeta: false,
     observe: false,
@@ -62,18 +57,9 @@ const normalizeRuntimeOption = (option = {}) => {
     observeMetaContent: true,
     observeChildList: true,
     observeDebounceMs: 0,
-  }
+  })
   if (!option || typeof option !== 'object') return opt
 
-  if (typeof option.imgAltCaption === 'boolean') {
-    opt.imgAltCaption = option.imgAltCaption
-  }
-  if (typeof option.imgTitleCaption === 'boolean') {
-    opt.imgTitleCaption = option.imgTitleCaption
-  }
-  if (typeof option.autoLangDetection === 'boolean') {
-    opt.autoLangDetection = option.autoLangDetection
-  }
   if (typeof option.readMeta === 'boolean') {
     opt.readMeta = option.readMeta
   }
@@ -100,21 +86,9 @@ const normalizeRuntimeOption = (option = {}) => {
       opt.observeAttributes = observeAttributes
     }
   }
-
-  if (typeof option.labelLang === 'string') {
-    const labelLang = option.labelLang.trim()
-    if (labelLang) {
-      opt.labelLang = labelLang
-    }
-  }
-  if (option.labelSet && typeof option.labelSet === 'object') {
-    opt.labelSet = option.labelSet
-  }
   if (typeof option.figureClass === 'string') {
     opt.figureClass = option.figureClass
   }
-
-  if (opt.imgTitleCaption) opt.imgAltCaption = false
   return opt
 }
 
@@ -217,12 +191,6 @@ const setStoredSourceValue = (element, name, value) => {
   if (sourceState[name] === nextValue) return
   sourceState[name] = nextValue
   sourceValueByImage.set(element, sourceState)
-}
-
-const getAttrWithSource = (element, name) => {
-  const value = getAttr(element, name)
-  if (value !== '') return value
-  return getStoredSourceValue(element, name)
 }
 
 const setAttrIfChanged = (element, name, value) => {
@@ -356,22 +324,38 @@ const applyMetaOptions = (targetOpt, meta, overrideFlags) => {
 }
 
 
-const getCaptionText = (img, opt) => {
+const getCaptionTextFromValues = (alt, title, opt) => {
   if (opt.imgTitleCaption) {
-    return getAttrWithSource(img, 'title')
+    return title
   }
   if (opt.imgAltCaption) {
-    return getAttrWithSource(img, 'alt')
+    return alt
   }
   return ''
 }
 
+const getSourceValues = (img) => {
+  const rawAlt = getAttr(img, 'alt')
+  const rawTitle = getAttr(img, 'title')
+  return {
+    rawAlt,
+    rawTitle,
+    alt: rawAlt || getStoredSourceValue(img, 'alt'),
+    title: rawTitle || getStoredSourceValue(img, 'title'),
+  }
+}
+
 const getCaptionTextForDetection = (img, opt) => {
-  const captionText = getCaptionText(img, opt)
+  const { alt, title } = getSourceValues(img)
+  const captionText = normalizeCaptionText(getCaptionTextFromValues(
+    alt,
+    title,
+    opt,
+  ))
   if (captionText) {
     return captionText
   }
-  return getAttrWithSource(img, 'alt')
+  return normalizeCaptionText(alt)
 }
 
 const resolveRuntimeOptionsWithCache = (opt, detectionState, firstImage) => {
@@ -389,9 +373,9 @@ const resolveRuntimeOptionsWithCache = (opt, detectionState, firstImage) => {
     }
 
     if (!detectionState.checked && firstImage) {
-      const rawText = getCaptionTextForDetection(firstImage, runtimeOpt).trim()
+      const rawText = getCaptionTextForDetection(firstImage, runtimeOpt)
       if (rawText) {
-        const detected = detectAutoLang(rawText)
+        const detected = detectAutoLang(rawText, runtimeOpt.labelLang)
         if (detected) {
           detectionState.detected = detected
         }
@@ -414,14 +398,8 @@ const resolveRuntimeOptionsWithCache = (opt, detectionState, firstImage) => {
 }
 
 const buildCaptionResult = (img, opt) => {
-  const rawAlt = getAttr(img, 'alt')
-  const rawTitle = getAttr(img, 'title')
-  const alt = getAttrWithSource(img, 'alt')
-  const captionText = getCaptionText(img, opt)
-  const hasLabel = Boolean(captionText && captionMarkRegImg && captionMarkRegImg.test(captionText))
-  const hasLabelWithNoJoint = (!hasLabel && captionText && labelOnlyReg)
-    ? captionText.match(labelOnlyReg)
-    : null
+  const { rawAlt, rawTitle, alt, title } = getSourceValues(img)
+  const { captionText, hasLabel } = analyzeCaptionText(getCaptionTextFromValues(alt, title, opt))
 
   let outputCaption = ''
   let nextAlt = alt
@@ -432,12 +410,6 @@ const buildCaptionResult = (img, opt) => {
     if (opt.imgAltCaption) {
       nextAlt = ''
     } else if (opt.imgTitleCaption) {
-      clearTitle = true
-    }
-  } else if (hasLabelWithNoJoint) {
-    outputCaption = captionText
-    nextAlt = hasLabelWithNoJoint[0].replace(jointSuffixReg, '')
-    if (opt.imgTitleCaption) {
       clearTitle = true
     }
   } else {
