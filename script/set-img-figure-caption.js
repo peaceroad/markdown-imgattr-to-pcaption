@@ -10,6 +10,8 @@ import {
 
 const activeObserverByDocument = new WeakMap()
 const sourceValueByImage = new WeakMap()
+const sourcePresenceByImage = new WeakMap()
+const restoreStateByImage = new WeakMap()
 let ownAttributeMutationByImage = new WeakMap()
 const NO_OWN_MUTATION = Symbol('no-own-mutation')
 let ownAttributeMutationCleanupTimer = null
@@ -177,33 +179,65 @@ const getAttr = (element, name) => {
   return value == null ? '' : value
 }
 
-const getStoredSourceValue = (element, name) => {
-  const sourceState = sourceValueByImage.get(element)
-  if (!sourceState) return ''
-  const value = sourceState[name]
-  return value == null ? '' : value
+const getAttrInfo = (element, name) => {
+  const value = element.getAttribute(name)
+  return {
+    present: value != null,
+    value: value == null ? '' : value,
+  }
 }
 
-const setStoredSourceValue = (element, name, value) => {
+const getStoredSourceEntry = (element, name) => {
+  const sourceState = sourceValueByImage.get(element)
+  if (!sourceState || !Object.prototype.hasOwnProperty.call(sourceState, name)) {
+    return {
+      hasValue: false,
+      present: false,
+      value: '',
+    }
+  }
+  const value = sourceState[name] == null ? '' : sourceState[name]
+  const sourcePresence = sourcePresenceByImage.get(element)
+  const present = sourcePresence && Object.prototype.hasOwnProperty.call(sourcePresence, name)
+    ? sourcePresence[name]
+    : value !== ''
+  return {
+    hasValue: true,
+    present,
+    value,
+  }
+}
+
+const getStoredSourceValue = (element, name) => {
+  return getStoredSourceEntry(element, name).value
+}
+
+const setStoredSourceValue = (element, name, value, present = undefined) => {
   if (!element) return
   const nextValue = value == null ? '' : String(value)
+  const nextPresent = typeof present === 'boolean' ? present : nextValue !== ''
   const sourceState = sourceValueByImage.get(element) || {}
-  if (sourceState[name] === nextValue) return
+  const sourcePresence = sourcePresenceByImage.get(element) || {}
+  if (sourceState[name] === nextValue && sourcePresence[name] === nextPresent) return
   sourceState[name] = nextValue
+  sourcePresence[name] = nextPresent
   sourceValueByImage.set(element, sourceState)
+  sourcePresenceByImage.set(element, sourcePresence)
 }
 
-const setAttrIfChanged = (element, name, value) => {
+const setAttrIfChanged = (element, name, value, preserveEmptyPresence = false) => {
   if (!element || typeof element.setAttribute !== 'function') return false
-  const current = getAttr(element, name)
+  const currentRaw = element.getAttribute(name)
+  const current = currentRaw == null ? '' : currentRaw
   const nextValue = value == null ? '' : String(value)
-  if (current === nextValue) return false
+  if (current === nextValue && (!preserveEmptyPresence || currentRaw != null || nextValue !== '')) return false
   element.setAttribute(name, nextValue)
   return true
 }
 
 const syncSourceAttr = (element, name) => {
-  setStoredSourceValue(element, name, getAttr(element, name))
+  const attr = getAttrInfo(element, name)
+  setStoredSourceValue(element, name, attr.value, attr.present)
 }
 
 const markOwnAttributeMutation = (element, name, expectedValue) => {
@@ -257,6 +291,16 @@ const setTextIfChanged = (element, value) => {
   const nextValue = value == null ? '' : String(value)
   if (element.textContent === nextValue) return
   element.textContent = nextValue
+}
+
+const findDirectFigcaption = (figure) => {
+  if (!figure || !figure.childNodes) return null
+  for (const child of figure.childNodes) {
+    if (isElementNode(child) && child.tagName === 'FIGCAPTION') {
+      return child
+    }
+  }
+  return null
 }
 
 const createCaption = (documentRef, text) => {
@@ -323,7 +367,6 @@ const applyMetaOptions = (targetOpt, meta, overrideFlags) => {
   setFlag('imgTitleCaption', overrideFlags.imgTitleCaption)
 }
 
-
 const getCaptionTextFromValues = (alt, title, opt) => {
   if (opt.imgTitleCaption) {
     return title
@@ -335,13 +378,15 @@ const getCaptionTextFromValues = (alt, title, opt) => {
 }
 
 const getSourceValues = (img) => {
-  const rawAlt = getAttr(img, 'alt')
-  const rawTitle = getAttr(img, 'title')
+  const rawAlt = getAttrInfo(img, 'alt')
+  const rawTitle = getAttrInfo(img, 'title')
   return {
-    rawAlt,
-    rawTitle,
-    alt: rawAlt || getStoredSourceValue(img, 'alt'),
-    title: rawTitle || getStoredSourceValue(img, 'title'),
+    rawAlt: rawAlt.value,
+    rawTitle: rawTitle.value,
+    rawAltPresent: rawAlt.present,
+    rawTitlePresent: rawTitle.present,
+    alt: rawAlt.value || getStoredSourceValue(img, 'alt'),
+    title: rawTitle.value || getStoredSourceValue(img, 'title'),
   }
 }
 
@@ -398,7 +443,7 @@ const resolveRuntimeOptionsWithCache = (opt, detectionState, firstImage) => {
 }
 
 const buildCaptionResult = (img, opt) => {
-  const { rawAlt, rawTitle, alt, title } = getSourceValues(img)
+  const { rawAlt, rawTitle, rawAltPresent, rawTitlePresent, alt, title } = getSourceValues(img)
   const { captionText, hasLabel } = analyzeCaptionText(getCaptionTextFromValues(alt, title, opt))
 
   let outputCaption = ''
@@ -428,19 +473,21 @@ const buildCaptionResult = (img, opt) => {
     nextAlt,
     clearTitle,
     sourceAlt: rawAlt,
+    sourceAltPresent: rawAltPresent,
     sourceTitle: rawTitle,
+    sourceTitlePresent: rawTitlePresent,
   }
 }
 
 const applyImageAttributes = (img, captionResult) => {
   if (!img || !captionResult) return
-  const currentSourceAlt = getStoredSourceValue(img, 'alt')
-  const currentSourceTitle = getStoredSourceValue(img, 'title')
-  if (captionResult.sourceAlt !== '' || currentSourceAlt === '') {
-    setStoredSourceValue(img, 'alt', captionResult.sourceAlt)
+  const currentSourceAlt = getStoredSourceEntry(img, 'alt')
+  const currentSourceTitle = getStoredSourceEntry(img, 'title')
+  if (captionResult.sourceAlt !== '' || !currentSourceAlt.hasValue || currentSourceAlt.value === '') {
+    setStoredSourceValue(img, 'alt', captionResult.sourceAlt, captionResult.sourceAltPresent)
   }
-  if (captionResult.sourceTitle !== '' || currentSourceTitle === '') {
-    setStoredSourceValue(img, 'title', captionResult.sourceTitle)
+  if (captionResult.sourceTitle !== '' || !currentSourceTitle.hasValue || currentSourceTitle.value === '') {
+    setStoredSourceValue(img, 'title', captionResult.sourceTitle, captionResult.sourceTitlePresent)
   }
   if (setAttrIfChanged(img, 'alt', captionResult.nextAlt)) {
     markOwnAttributeMutation(img, 'alt', captionResult.nextAlt == null ? '' : String(captionResult.nextAlt))
@@ -452,10 +499,103 @@ const applyImageAttributes = (img, captionResult) => {
   }
 }
 
+const ensureRestoreState = (img) => {
+  let state = restoreStateByImage.get(img)
+  if (state) return state
+
+  const figure = typeof img.closest === 'function' ? img.closest('figure') : null
+  const figcaption = figure ? findDirectFigcaption(figure) : null
+  const alt = getAttrInfo(img, 'alt')
+  const title = getAttrInfo(img, 'title')
+  state = {
+    originalAlt: alt.value,
+    originalAltPresent: alt.present,
+    originalTitle: title.value,
+    originalTitlePresent: title.present,
+    createdFigure: false,
+    hadFigcaption: Boolean(figcaption),
+    originalFigcaption: figcaption || null,
+    originalFigcaptionText: figcaption ? figcaption.textContent : '',
+  }
+  restoreStateByImage.set(img, state)
+  return state
+}
+
+const restoreAttribute = (img, name, present, value) => {
+  const storedSource = getStoredSourceEntry(img, name)
+  const restorePresent = storedSource.hasValue ? storedSource.present : present
+  const restoreValue = storedSource.hasValue ? storedSource.value : value
+  if (restorePresent) {
+    if (setAttrIfChanged(img, name, restoreValue, true)) {
+      markOwnAttributeMutation(img, name, restoreValue == null ? '' : String(restoreValue))
+    }
+    setStoredSourceValue(img, name, restoreValue, true)
+    return
+  }
+  if (removeAttr(img, name)) {
+    markOwnAttributeMutation(img, name, img.getAttribute(name))
+  }
+  setStoredSourceValue(img, name, '', false)
+}
+
+const restoreImageState = (img) => {
+  const state = restoreStateByImage.get(img)
+  if (!state) return false
+
+  restoreAttribute(img, 'alt', state.originalAltPresent, state.originalAlt)
+  restoreAttribute(img, 'title', state.originalTitlePresent, state.originalTitle)
+
+  const figure = typeof img.closest === 'function' ? img.closest('figure') : null
+  if (figure) {
+    const directFigcaption = findDirectFigcaption(figure)
+    if (state.hadFigcaption) {
+      const targetFigcaption = (
+        state.originalFigcaption &&
+        state.originalFigcaption.parentNode === figure
+      )
+        ? state.originalFigcaption
+        : directFigcaption
+
+      if (targetFigcaption) {
+        setTextIfChanged(targetFigcaption, state.originalFigcaptionText)
+      } else {
+        figure.appendChild(createCaption(figure.ownerDocument, state.originalFigcaptionText))
+      }
+    } else if (directFigcaption && directFigcaption.parentNode) {
+      directFigcaption.parentNode.removeChild(directFigcaption)
+    }
+  }
+
+  if (state.createdFigure && img.parentNode && img.parentNode.tagName === 'FIGURE') {
+    const figure = img.parentNode
+    const parent = figure.parentNode
+    if (parent) {
+      parent.insertBefore(img, figure)
+      if (figure.childNodes && figure.childNodes.length === 0) {
+        parent.removeChild(figure)
+      }
+    }
+  }
+
+  restoreStateByImage.delete(img)
+  return true
+}
+
+const restoreProcessedImages = (images) => {
+  const restored = []
+  for (const img of images) {
+    if (restoreImageState(img)) {
+      restored.push(img)
+    }
+  }
+  return restored
+}
+
 const updateFigure = (img, captionText, opt) => {
+  const state = restoreStateByImage.get(img)
   const figure = img.closest('figure')
   if (figure) {
-    const figcaption = figure.querySelector('figcaption')
+    const figcaption = findDirectFigcaption(figure)
     if (!captionText || isBlank(captionText)) {
       if (figcaption && figcaption.parentNode) {
         figcaption.parentNode.removeChild(figcaption)
@@ -480,10 +620,14 @@ const updateFigure = (img, captionText, opt) => {
   parent.insertBefore(figureEl, img)
   figureEl.appendChild(img)
   figureEl.appendChild(createCaption(figureEl.ownerDocument, captionText))
+  if (state) {
+    state.createdFigure = true
+  }
 }
 
 const processImages = (images, opt) => {
   for (const img of images) {
+    ensureRestoreState(img)
     const captionResult = buildCaptionResult(img, opt)
     applyImageAttributes(img, captionResult)
     updateFigure(img, captionResult.captionText, opt)
@@ -535,7 +679,9 @@ export default async function setImgFigureCaption(option = {}) {
 
   const runProcess = (targets = null) => {
     const currentOpt = buildContext()
-    if (!currentOpt.imgAltCaption && !currentOpt.imgTitleCaption) return []
+    if (!currentOpt.imgAltCaption && !currentOpt.imgTitleCaption) {
+      return restoreProcessedImages(collectScopedImages('all', targets))
+    }
     const images = collectScopedImages(currentOpt.scope, targets)
     if (images.length === 0) return []
     const firstImage = currentOpt.autoLangDetection

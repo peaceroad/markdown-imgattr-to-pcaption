@@ -28,6 +28,6 @@
   },
   "homepage": "https://github.com/peaceroad/markdown-imgattr-to-pcaption#readme",
   "dependencies": {
-    "p7d-markdown-it-p-captions": "^0.22.0"
+    "p7d-markdown-it-p-captions": "^0.23.0"
   }
 }

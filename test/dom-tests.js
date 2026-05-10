@@ -5,6 +5,15 @@ export const runDomTests = async ({
   assert,
   setImgFigureCaption,
 }) => {
+  const findDirectFigcaption = (figure) => {
+    for (const child of figure.childNodes) {
+      if (child && child.nodeType === 1 && child.tagName === 'FIGCAPTION') {
+        return child
+      }
+    }
+    return null
+  }
+
   await runDomTest('wraps image and caption', async () => {
     await withDocument(async (doc) => {
       const img = doc.createElement('img')
@@ -147,6 +156,114 @@ export const runDomTests = async ({
       const figure = doc.body.querySelector('figure')
       assert.strictEqual(figure, null)
       assert.strictEqual(img.getAttribute('alt'), 'Caption')
+    })
+  })
+
+  await runDomTest('disabling caption modes restores helper-created figure and source attributes', async () => {
+    await withDocument(async (doc) => {
+      const img = doc.createElement('img')
+      img.setAttribute('alt', 'Caption')
+      doc.body.appendChild(img)
+
+      await setImgFigureCaption({ imgAltCaption: true })
+      assert.ok(img.closest('figure'), 'figure should be created')
+      assert.strictEqual(img.getAttribute('alt'), '')
+
+      await setImgFigureCaption({ imgAltCaption: false, imgTitleCaption: false })
+
+      assert.strictEqual(img.closest('figure'), null)
+      assert.strictEqual(doc.body.querySelector('figure'), null)
+      assert.strictEqual(img.getAttribute('alt'), 'Caption')
+    })
+  })
+
+  await runDomTest('disabling caption modes restores existing figure caption text', async () => {
+    await withDocument(async (doc) => {
+      const figure = doc.createElement('figure')
+      const img = doc.createElement('img')
+      img.setAttribute('alt', 'New caption')
+      const caption = doc.createElement('figcaption')
+      caption.textContent = 'Original caption'
+      figure.appendChild(img)
+      figure.appendChild(caption)
+      doc.body.appendChild(figure)
+
+      await setImgFigureCaption({ imgAltCaption: true })
+      assert.strictEqual(caption.textContent, 'Figure. New caption')
+      assert.strictEqual(img.getAttribute('alt'), '')
+
+      await setImgFigureCaption({ imgAltCaption: false, imgTitleCaption: false })
+
+      assert.strictEqual(img.closest('figure'), figure)
+      assert.strictEqual(caption.textContent, 'Original caption')
+      assert.strictEqual(img.getAttribute('alt'), 'New caption')
+    })
+  })
+
+  await runDomTest('disabling caption modes restores title mode attributes', async () => {
+    await withDocument(async (doc) => {
+      const img = doc.createElement('img')
+      img.setAttribute('alt', 'Alt text')
+      img.setAttribute('title', 'Title caption')
+      doc.body.appendChild(img)
+
+      await setImgFigureCaption({
+        imgTitleCaption: true,
+        autoLangDetection: false,
+        labelLang: 'en',
+      })
+      assert.strictEqual(img.getAttribute('alt'), 'Alt text')
+      assert.strictEqual(img.getAttribute('title'), null)
+
+      await setImgFigureCaption({ imgAltCaption: false, imgTitleCaption: false })
+
+      assert.strictEqual(img.closest('figure'), null)
+      assert.strictEqual(img.getAttribute('alt'), 'Alt text')
+      assert.strictEqual(img.getAttribute('title'), 'Title caption')
+    })
+  })
+
+  await runDomTest('disabling caption modes restores empty source attribute presence', async () => {
+    await withDocument(async (doc) => {
+      const img = doc.createElement('img')
+      img.setAttribute('alt', 'Alt text')
+      img.setAttribute('title', '')
+      doc.body.appendChild(img)
+
+      await setImgFigureCaption({
+        imgTitleCaption: true,
+        autoLangDetection: false,
+        labelLang: 'en',
+      })
+      assert.strictEqual(img.getAttribute('title'), null)
+
+      await setImgFigureCaption({ imgAltCaption: false, imgTitleCaption: false })
+
+      assert.strictEqual(img.hasAttribute('title'), true)
+      assert.strictEqual(img.getAttribute('title'), '')
+    })
+  })
+
+  await runDomTest('updates only direct figcaption inside existing figure', async () => {
+    await withDocument(async (doc) => {
+      const figure = doc.createElement('figure')
+      const img = doc.createElement('img')
+      img.setAttribute('alt', 'Caption')
+      const wrapper = doc.createElement('div')
+      const nestedCaption = doc.createElement('figcaption')
+      nestedCaption.textContent = 'Nested caption'
+      wrapper.appendChild(nestedCaption)
+      figure.appendChild(img)
+      figure.appendChild(wrapper)
+      doc.body.appendChild(figure)
+
+      await setImgFigureCaption({ imgAltCaption: true })
+
+      const directCaption = findDirectFigcaption(figure)
+      assert.ok(directCaption, 'direct figcaption should be created')
+      assert.notStrictEqual(directCaption, nestedCaption)
+      assert.strictEqual(directCaption.textContent, 'Figure. Caption')
+      assert.strictEqual(nestedCaption.textContent, 'Nested caption')
     })
   })
 
@@ -403,6 +520,41 @@ export const runDomTests = async ({
 
         const figcaption = img.closest('figure').querySelector('figcaption')
         assert.strictEqual(figcaption.textContent, 'Figure. External')
+      })
+    })
+  })
+
+  await runDomTest('restore uses latest externally synced source attribute', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Initial')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({ imgAltCaption: true, observe: true })
+
+        const observer = ObserverClass.instances[0]
+        img.setAttribute('alt', 'External')
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'alt',
+          },
+        ])
+
+        const figcaption = img.closest('figure').querySelector('figcaption')
+        assert.strictEqual(figcaption.textContent, 'Figure. External')
+        assert.strictEqual(img.getAttribute('alt'), '')
+
+        await setImgFigureCaption({
+          imgAltCaption: false,
+          imgTitleCaption: false,
+          observe: false,
+        })
+
+        assert.strictEqual(img.closest('figure'), null)
+        assert.strictEqual(img.getAttribute('alt'), 'External')
       })
     })
   })
@@ -672,8 +824,8 @@ export const runDomTests = async ({
         })
 
         await new Promise((resolve) => setTimeout(resolve, 70))
-        const figcaption = img.closest('figure').querySelector('figcaption')
-        assert.strictEqual(figcaption.textContent, 'Figure. Initial')
+        assert.strictEqual(img.closest('figure'), null)
+        assert.strictEqual(img.getAttribute('alt'), 'Pending')
       })
     })
   })
@@ -711,8 +863,8 @@ export const runDomTests = async ({
         assert.strictEqual(firstObserver.disconnected, true)
         await new Promise((resolve) => setTimeout(resolve, 70))
 
-        const figcaption = img.closest('figure').querySelector('figcaption')
-        assert.strictEqual(figcaption.textContent, 'Figure. Initial')
+        assert.strictEqual(img.closest('figure'), null)
+        assert.strictEqual(img.getAttribute('alt'), 'Pending')
       })
     })
   })
@@ -816,6 +968,40 @@ export const runDomTests = async ({
         assert.ok(figure, 'figure should be created after meta content update')
         const figcaption = figure.querySelector('figcaption')
         assert.strictEqual(figcaption.textContent, 'Figure. Caption')
+      })
+    })
+  })
+
+  await runDomTest('observe mode restores helper changes when readMeta disables captions', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const meta = doc.createElement('meta')
+        meta.setAttribute('name', 'markdown-frontmatter')
+        meta.setAttribute('content', JSON.stringify({ imgAltCaption: true }))
+        doc.body.appendChild(meta)
+
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Caption')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({ readMeta: true, observe: true })
+        const figure = img.closest('figure')
+        assert.ok(figure, 'figure should be created before meta disables captions')
+        assert.strictEqual(img.getAttribute('alt'), '')
+
+        const observer = ObserverClass.instances[0]
+        meta.setAttribute('content', JSON.stringify({ imgAltCaption: false, imgTitleCaption: false }))
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: meta,
+            attributeName: 'content',
+          },
+        ])
+
+        assert.strictEqual(img.closest('figure'), null)
+        assert.strictEqual(doc.body.querySelector('figure'), null)
+        assert.strictEqual(img.getAttribute('alt'), 'Caption')
       })
     })
   })

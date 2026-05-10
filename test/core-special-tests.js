@@ -64,4 +64,14 @@ export const runCoreSpecialTests = ({ runCoreTest, assert, setMarkdownImgAttrToP
     })
     assert.strictEqual(out, expected)
   })
+
+  runCoreTest('ignores misspelled lable labelSet key', () => {
+    const src = 'Paragraph.\n\n![Caption](image.jpg)\n\nParagraph.'
+    const expected = 'Paragraph.\n\nFigure. Caption\n\n![](image.jpg)\n\nParagraph.'
+    const out = setMarkdownImgAttrToPCaption(src, {
+      autoLangDetection: false,
+      labelSet: { lable: 'Fig' },
+    })
+    assert.strictEqual(out, expected)
+  })
 }

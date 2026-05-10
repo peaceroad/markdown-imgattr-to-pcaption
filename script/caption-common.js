@@ -158,9 +158,7 @@ const normalizeLabelConfig = (value) => {
   if (!value || typeof value !== 'object') return null
   const config = {}
   let hasConfig = false
-  const labelValue = (typeof value.label === 'string')
-    ? value.label
-    : (typeof value.lable === 'string' ? value.lable : undefined)
+  const labelValue = (typeof value.label === 'string') ? value.label : undefined
   if (labelValue !== undefined) {
     config.label = labelValue
     hasConfig = true

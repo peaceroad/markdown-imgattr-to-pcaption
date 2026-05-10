@@ -73,6 +73,7 @@ This file documents the current implementation workflow so contributors can keep
    - Treat normalized runtime options as seed options; on each reprocess, merge fresh meta values onto the seed (do not reuse already-merged options as new seeds).
    - Frontmatter flags are applied only when values are actual booleans.
 2. If caption mode is disabled (`imgAltCaption` and `imgTitleCaption` both false), return.
+   - If captions were previously applied by this helper, restore helper-managed DOM changes where possible.
 3. Resolve runtime label options with `autoLangDetection` cache.
 4. Collect target images by `scope`:
    - `all`: all images (default).
@@ -104,6 +105,7 @@ This file documents the current implementation workflow so contributors can keep
 - On image tree change (`childList`) and meta change:
   - may trigger full reprocess (`pendingAll`) and language cache reset.
   - for `scope: 'standalone'`, child-list sibling changes also queue affected sibling `img` nodes for reevaluation.
+- If fresh meta disables both caption modes, restore previously helper-managed image attributes and captions.
 
 ## Behavior parity contract
 
@@ -116,7 +118,7 @@ Keep these aligned between `index.js` and DOM helper:
 
 ## Compatibility notes
 
-- This project depends on `p7d-markdown-it-p-captions@^0.22.0`.
+- This project depends on `p7d-markdown-it-p-captions@^0.23.0`.
 - `script/caption-common.js` is the single place that talks to upstream helper APIs (`analyzeCaptionStart`, `getGeneratedLabelDefaults`, `getMarkRegStateForLanguages`).
 - `script/caption-common.js` caches per-language generated label defaults locally and clones before applying `labelSet` overrides.
 - Do not import removed legacy `markReg` export.

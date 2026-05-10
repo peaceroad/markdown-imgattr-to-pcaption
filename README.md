@@ -119,6 +119,7 @@ await setImgFigureCaption({
 - Uses internal source cache for stable reprocessing without extra DOM attributes.
 - Re-detects language when first-image context changes.
 - `observe` supports tuning by attribute/meta/child-list granularity and optional quiet-period debounce.
+- If caption modes are later disabled, restores helper-managed captions and source attributes where possible.
 
 ### Options
 
