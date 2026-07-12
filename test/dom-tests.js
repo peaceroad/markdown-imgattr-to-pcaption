@@ -524,6 +524,35 @@ export const runDomTests = async ({
     })
   })
 
+  await runDomTest('observe mode treats an immediate empty alt write as external', async () => {
+    await withMutationObserver(async (ObserverClass) => {
+      await withDocument(async (doc) => {
+        const img = doc.createElement('img')
+        img.setAttribute('alt', 'Initial')
+        doc.body.appendChild(img)
+
+        await setImgFigureCaption({ imgAltCaption: true, observe: true })
+
+        const observer = ObserverClass.instances[0]
+        img.setAttribute('alt', '')
+        observer.trigger([
+          {
+            type: 'attributes',
+            target: img,
+            attributeName: 'alt',
+          },
+        ])
+
+        await setImgFigureCaption({
+          imgAltCaption: false,
+          imgTitleCaption: false,
+          observe: false,
+        })
+        assert.strictEqual(img.getAttribute('alt'), '')
+      })
+    })
+  })
+
   await runDomTest('restore uses latest externally synced source attribute', async () => {
     await withMutationObserver(async (ObserverClass) => {
       await withDocument(async (doc) => {

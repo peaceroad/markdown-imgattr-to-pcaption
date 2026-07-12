@@ -22,6 +22,7 @@ const DEFAULT_MARK_REG_STATE = getMarkRegStateForLanguages()
 const ENGLISH_MARK_REG_STATE = getMarkRegStateForLanguages(['en'])
 const DEFAULT_GENERATED_LABEL_DEFAULTS_BY_LANG = DEFAULT_MARK_REG_STATE.generatedLabelDefaultsByLang || Object.create(null)
 const ENGLISH_GENERATED_LABEL_DEFAULTS = getGeneratedLabelDefaults('img', '', ENGLISH_MARK_REG_STATE)
+const DEFAULT_LABEL_CONFIG_CACHE_MAX = 32
 const defaultLabelConfigCache = new Map()
 
 export const CAPTION_RUNTIME_OPTION_DEFAULTS = Object.freeze({
@@ -205,6 +206,9 @@ const getCachedGeneratedLabelDefaults = (labelLang) => {
     '',
     getMarkRegStateForLanguages([labelLang]),
   )
+  if (defaultLabelConfigCache.size >= DEFAULT_LABEL_CONFIG_CACHE_MAX) {
+    defaultLabelConfigCache.delete(defaultLabelConfigCache.keys().next().value)
+  }
   defaultLabelConfigCache.set(labelLang, defaults || null)
   return defaults || null
 }

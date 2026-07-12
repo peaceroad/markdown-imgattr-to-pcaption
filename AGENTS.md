@@ -118,9 +118,10 @@ Keep these aligned between `index.js` and DOM helper:
 
 ## Compatibility notes
 
-- This project depends on `p7d-markdown-it-p-captions@^0.23.0`.
+- This project depends on `p7d-markdown-it-p-captions@^0.24.0`.
 - `script/caption-common.js` is the single place that talks to upstream helper APIs (`analyzeCaptionStart`, `getGeneratedLabelDefaults`, `getMarkRegStateForLanguages`).
 - `script/caption-common.js` caches per-language generated label defaults locally and clones before applying `labelSet` overrides.
+- The per-language generated-label cache is bounded so arbitrary unsupported `labelLang` values cannot grow module-global state without limit.
 - Do not import removed legacy `markReg` export.
 - Boolean-like strings are not treated as option flags.
 
@@ -161,5 +162,7 @@ Coverage currently includes:
 - In DOM helper, skip source-cache writes when stored values are unchanged.
 - In DOM helper hot paths, avoid duplicate `alt` / `title` source lookups for the same image.
 - In DOM helper, for `scope: 'figure-only'`, prefer `figure img` selector over scanning all images.
+- In the DOM helper, exit one-shot mode before allocating observer queues, sets, and scheduler closures.
+- In observe mode, complete the synchronous initial transform before attaching the observer so initialization does not queue a redundant self-triggered pass.
 - In observe mode, inspect mutation node sets once per added/removed batch and schedule only when pending targets actually exist.
 - In `readMeta` path, parse frontmatter JSON only when meta `content` actually changes (reuse parsed result for identical content).

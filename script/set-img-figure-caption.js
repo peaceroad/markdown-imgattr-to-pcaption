@@ -15,7 +15,16 @@ const restoreStateByImage = new WeakMap()
 let ownAttributeMutationByImage = new WeakMap()
 const NO_OWN_MUTATION = Symbol('no-own-mutation')
 let ownAttributeMutationCleanupTimer = null
-const OBSERVABLE_IMAGE_ATTRIBUTES = ['alt', 'title']
+
+const disconnectObserverState = (state) => {
+  if (!state) return
+  if (typeof state.cancelPending === 'function') {
+    state.cancelPending()
+  }
+  if (state.observer && typeof state.observer.disconnect === 'function') {
+    state.observer.disconnect()
+  }
+}
 
 const normalizeScope = (value) => {
   if (typeof value !== 'string') return 'all'
@@ -42,10 +51,8 @@ const normalizeObserveAttributes = (value) => {
     }
   }
   const attrs = []
-  for (const attrName of OBSERVABLE_IMAGE_ATTRIBUTES) {
-    if (attrName === 'alt' && hasAlt) attrs.push(attrName)
-    if (attrName === 'title' && hasTitle) attrs.push(attrName)
-  }
+  if (hasAlt) attrs.push('alt')
+  if (hasTitle) attrs.push('title')
   return attrs
 }
 
@@ -209,7 +216,9 @@ const getStoredSourceEntry = (element, name) => {
 }
 
 const getStoredSourceValue = (element, name) => {
-  return getStoredSourceEntry(element, name).value
+  const sourceState = sourceValueByImage.get(element)
+  if (!sourceState || !Object.prototype.hasOwnProperty.call(sourceState, name)) return ''
+  return sourceState[name] == null ? '' : sourceState[name]
 }
 
 const setStoredSourceValue = (element, name, value, present = undefined) => {
@@ -378,15 +387,17 @@ const getCaptionTextFromValues = (alt, title, opt) => {
 }
 
 const getSourceValues = (img) => {
-  const rawAlt = getAttrInfo(img, 'alt')
-  const rawTitle = getAttrInfo(img, 'title')
+  const rawAltValue = img.getAttribute('alt')
+  const rawTitleValue = img.getAttribute('title')
+  const rawAlt = rawAltValue == null ? '' : rawAltValue
+  const rawTitle = rawTitleValue == null ? '' : rawTitleValue
   return {
-    rawAlt: rawAlt.value,
-    rawTitle: rawTitle.value,
-    rawAltPresent: rawAlt.present,
-    rawTitlePresent: rawTitle.present,
-    alt: rawAlt.value || getStoredSourceValue(img, 'alt'),
-    title: rawTitle.value || getStoredSourceValue(img, 'title'),
+    rawAlt,
+    rawTitle,
+    rawAltPresent: rawAltValue != null,
+    rawTitlePresent: rawTitleValue != null,
+    alt: rawAlt || getStoredSourceValue(img, 'alt'),
+    title: rawTitle || getStoredSourceValue(img, 'title'),
   }
 }
 
@@ -445,33 +456,14 @@ const resolveRuntimeOptionsWithCache = (opt, detectionState, firstImage) => {
 const buildCaptionResult = (img, opt) => {
   const { rawAlt, rawTitle, rawAltPresent, rawTitlePresent, alt, title } = getSourceValues(img)
   const { captionText, hasLabel } = analyzeCaptionText(getCaptionTextFromValues(alt, title, opt))
-
-  let outputCaption = ''
-  let nextAlt = alt
-  let clearTitle = false
-
-  if (hasLabel) {
-    outputCaption = captionText
-    if (opt.imgAltCaption) {
-      nextAlt = ''
-    } else if (opt.imgTitleCaption) {
-      clearTitle = true
-    }
-  } else {
-    const hasCaption = captionText !== ''
-    const labelPrefix = buildLabelPrefix(opt.labelMeta, hasCaption)
-    outputCaption = hasCaption ? labelPrefix + captionText : labelPrefix
-    if (opt.imgAltCaption) {
-      nextAlt = ''
-    } else if (opt.imgTitleCaption) {
-      clearTitle = true
-    }
-  }
+  const outputCaption = hasLabel
+    ? captionText
+    : buildLabelPrefix(opt.labelMeta, captionText !== '') + captionText
 
   return {
     captionText: outputCaption,
-    nextAlt,
-    clearTitle,
+    nextAlt: opt.imgAltCaption ? '' : alt,
+    clearTitle: opt.imgTitleCaption,
     sourceAlt: rawAlt,
     sourceAltPresent: rawAltPresent,
     sourceTitle: rawTitle,
@@ -691,6 +683,34 @@ export default async function setImgFigureCaption(option = {}) {
     return processImages(images, runtimeOpt)
   }
 
+  const activeObserverState = activeObserverByDocument.get(document)
+  if (!opt.observe || typeof MutationObserver !== 'function') {
+    if (activeObserverState) {
+      disconnectObserverState(activeObserverState)
+      activeObserverByDocument.delete(document)
+    }
+    return runProcess()
+  }
+
+  const observeImageAttributeSet = new Set(opt.observeAttributes)
+  const observeMetaContent = opt.readMeta && opt.observeMetaContent
+  const observeAttributesEnabled = observeImageAttributeSet.size > 0 || observeMetaContent
+  const observeChildListEnabled = opt.observeChildList
+  const root = document.documentElement || document.body
+  if (!root || (!observeAttributesEnabled && !observeChildListEnabled)) {
+    if (activeObserverState) {
+      disconnectObserverState(activeObserverState)
+      activeObserverByDocument.delete(document)
+    }
+    return runProcess()
+  }
+  if (activeObserverState) {
+    disconnectObserverState(activeObserverState)
+  }
+
+  const attributeFilter = opt.observeAttributes.slice()
+  if (observeMetaContent) attributeFilter.push('content')
+
   let scheduled = false
   let scheduleTimeoutId = null
   let scheduleAnimationFrameId = null
@@ -823,47 +843,6 @@ export default async function setImgFigureCaption(option = {}) {
     return { queuedScopedImage, hasAnyImage, hasMeta }
   }
 
-  const observeImageAttributeSet = new Set(opt.observeAttributes)
-  const observeMetaContent = opt.readMeta && opt.observeMetaContent
-  const observeAttributesEnabled = observeImageAttributeSet.size > 0 || observeMetaContent
-  const observeChildListEnabled = opt.observeChildList
-  const attributeFilter = []
-  for (const attrName of opt.observeAttributes) {
-    attributeFilter.push(attrName)
-  }
-  if (observeMetaContent) attributeFilter.push('content')
-
-  const activeObserverState = activeObserverByDocument.get(document)
-  const disconnectActiveObserver = (state) => {
-    if (!state) return
-    if (typeof state.cancelPending === 'function') {
-      state.cancelPending()
-    }
-    if (state.observer && typeof state.observer.disconnect === 'function') {
-      state.observer.disconnect()
-    }
-  }
-  if (!opt.observe || typeof MutationObserver !== 'function') {
-    if (activeObserverState) {
-      disconnectActiveObserver(activeObserverState)
-      activeObserverByDocument.delete(document)
-    }
-    return runProcess()
-  }
-
-  const root = document.documentElement || document.body
-  if (!root || (!observeAttributesEnabled && !observeChildListEnabled)) {
-    if (activeObserverState) {
-      disconnectActiveObserver(activeObserverState)
-      activeObserverByDocument.delete(document)
-    }
-    return runProcess()
-  }
-
-  if (activeObserverState) {
-    disconnectActiveObserver(activeObserverState)
-  }
-
   const observer = new MutationObserver((mutations) => {
     let shouldSchedule = false
     let metaChanged = false
@@ -957,8 +936,12 @@ export default async function setImgFigureCaption(option = {}) {
     observeConfig.attributes = true
     observeConfig.attributeFilter = attributeFilter
   }
+  const processedImages = runProcess()
+  for (const img of processedImages) {
+    ownAttributeMutationByImage.delete(img)
+  }
   observer.observe(root, observeConfig)
   activeObserverByDocument.set(document, { observer, cancelPending: clearScheduledProcess })
 
-  return runProcess()
+  return processedImages
 }
